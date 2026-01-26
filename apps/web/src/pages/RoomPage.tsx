@@ -12,6 +12,7 @@ import FloatingChat from '../components/FloatingChat';
 import DanmakuOverlay from '../components/DanmakuOverlay';
 import MobileTradeDock from '../components/MobileTradeDock';
 import LobbyPanel from '../components/LobbyPanel';
+import ErrorBoundary from '../components/ErrorBoundary';
 import { useI18n } from '../i18n';
 import { normalizeRoomId } from '../utils/room';
 
@@ -380,32 +381,44 @@ const RoomPage = ({
 
       <div className="grid gap-4 lg:grid-cols-[2.4fr_1.1fr]">
         <div className="flex flex-col gap-4 min-w-0">
-          <Suspense
+          <ErrorBoundary
             fallback={(
-              <div className="pixel-card flex items-center justify-center h-[60vh] min-h-[360px]">
-                <div className="text-sm text-[var(--muted)]">{t('loading')}</div>
+              <div className="pixel-card flex flex-col items-center justify-center h-[60vh] min-h-[360px] text-center gap-3">
+                <div className="pixel-title text-sm">{t('chartLoadFailed')}</div>
+                <div className="text-xs text-[var(--muted)]">{t('chartLoadFailedHint')}</div>
+                <button className="pixel-button ghost text-xs" onClick={() => window.location.reload()}>
+                  {t('reload')}
+                </button>
               </div>
             )}
           >
-            <MarketChartPanel
-              market={market}
-              player={self}
-              heightClassName="h-[60vh] min-h-[360px]"
-              overlay={(
-                <>
-                  <DanmakuOverlay enabled={danmakuEnabled} messages={room.chat} />
-                  {showLobbyOverlay && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                      <div className="pixel-card event-banner text-center">
-                        <div className="text-xs uppercase tracking-widest text-[var(--muted)]">{t('lobbyTitle')}</div>
-                        <div className="text-2xl font-black mt-2">{t('readyUpToStart')}</div>
-                      </div>
-                    </div>
-                  )}
-                </>
+            <Suspense
+              fallback={(
+                <div className="pixel-card flex items-center justify-center h-[60vh] min-h-[360px]">
+                  <div className="text-sm text-[var(--muted)]">{t('loading')}</div>
+                </div>
               )}
-            />
-          </Suspense>
+            >
+              <MarketChartPanel
+                market={market}
+                player={self}
+                heightClassName="h-[60vh] min-h-[360px]"
+                overlay={(
+                  <>
+                    <DanmakuOverlay enabled={danmakuEnabled} messages={room.chat} />
+                    {showLobbyOverlay && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                        <div className="pixel-card event-banner text-center">
+                          <div className="text-xs uppercase tracking-widest text-[var(--muted)]">{t('lobbyTitle')}</div>
+                          <div className="text-2xl font-black mt-2">{t('readyUpToStart')}</div>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              />
+            </Suspense>
+          </ErrorBoundary>
 
           <div className="grid gap-4 lg:grid-cols-[1.35fr_1fr]">
             <PositionPanel

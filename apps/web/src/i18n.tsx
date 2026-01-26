@@ -309,6 +309,9 @@ const MESSAGES = {
     leaderboardSubmitFailed: 'Failed to submit leaderboard.',
     leaderboardPrivyMissing: 'Privy server keys are missing.',
     leaderboardWsDisconnected: 'Not connected to the game server.',
+    chartLoadFailed: 'Chart failed to load',
+    chartLoadFailedHint: 'Please refresh the page or try again.',
+    reload: 'Reload',
   },
   'zh-CN': {
     appName: 'PK Candle',
@@ -613,6 +616,9 @@ const MESSAGES = {
     leaderboardSubmitFailed: '提交排行榜失败。',
     leaderboardPrivyMissing: '服务器未配置 Privy。',
     leaderboardWsDisconnected: '未连接到游戏服务器。',
+    chartLoadFailed: '图表加载失败',
+    chartLoadFailedHint: '请刷新页面或稍后再试。',
+    reload: '刷新',
   },
 };
 
