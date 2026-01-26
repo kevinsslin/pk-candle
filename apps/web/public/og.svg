@@ -1,0 +1,77 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#04070f"/>
+      <stop offset="55%" stop-color="#0a1225"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <radialGradient id="glow1" cx="0.82" cy="0.2" r="0.45">
+      <stop offset="0%" stop-color="#2ef7ff" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#2ef7ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="0.18" cy="0.18" r="0.5">
+      <stop offset="0%" stop-color="#ff4fd8" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#ff4fd8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow3" cx="0.5" cy="0.85" r="0.6">
+      <stop offset="0%" stop-color="#39ff8f" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#39ff8f" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
+      <path d="M28 0H0V28" fill="none" stroke="#2ef7ff" stroke-opacity="0.08" stroke-width="1"/>
+    </pattern>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#glow1)"/>
+  <rect width="1200" height="630" fill="url(#glow2)"/>
+  <rect width="1200" height="630" fill="url(#glow3)"/>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+
+  <g filter="url(#glow)">
+    <path
+      d="M120 420 L240 360 L320 410 L410 300 L520 340 L620 250 L740 310 L840 220 L1040 270"
+      fill="none"
+      stroke="#2ef7ff"
+      stroke-width="6"
+      stroke-linecap="round"
+    />
+  </g>
+
+  <g>
+    <rect x="90" y="90" width="520" height="200" rx="18" fill="rgba(6, 10, 22, 0.7)" stroke="#2ef7ff" stroke-opacity="0.35"/>
+    <text x="130" y="175" font-family="Anton, Impact, sans-serif" font-size="78" fill="#e6f2ff" letter-spacing="4">
+      PK CANDLE
+    </text>
+    <text x="130" y="225" font-family="Epilogue, Arial, sans-serif" font-size="24" fill="#9bb1d1">
+      Meme-market PvP trading. Ride the same candle.
+    </text>
+    <text x="130" y="255" font-family="Epilogue, Arial, sans-serif" font-size="20" fill="#39ff8f">
+      Live rooms · Chat · Leaderboards
+    </text>
+  </g>
+
+  <g opacity="0.8">
+    <rect x="820" y="92" width="290" height="140" rx="14" fill="rgba(6, 10, 22, 0.65)" stroke="#ff4fd8" stroke-opacity="0.45"/>
+    <text x="850" y="150" font-family="Epilogue, Arial, sans-serif" font-size="20" fill="#ff4fd8">
+      VOLATILE
+    </text>
+    <text x="850" y="185" font-family="Epilogue, Arial, sans-serif" font-size="38" fill="#e6f2ff" letter-spacing="2">
+      5 MIN PK
+    </text>
+  </g>
+
+  <g>
+    <rect x="90" y="520" width="1020" height="2" fill="#2ef7ff" opacity="0.25"/>
+    <text x="90" y="555" font-family="Epilogue, Arial, sans-serif" font-size="18" fill="#9bb1d1">
+      Join. Trade. Survive. Share the meme.
+    </text>
+  </g>
+</svg>

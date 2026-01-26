@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["vite/client"],
+    "baseUrl": ".",
+    "paths": {
+      "@pk-candle/shared": ["../../packages/shared/src/index.ts"],
+      "@pk-candle/shared/*": ["../../packages/shared/src/*"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}
