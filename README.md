@@ -4,6 +4,8 @@
 
 **"玩的不是币，是你自己的情绪。"**
 
+<img src="apps/web/public/logo.jpeg" alt="PK Candle logo" width="220" />
+
 A fast, meme‑heavy multiplayer market sim with synced rooms, real‑time chat, and a global leaderboard.
 
 </div>

@@ -574,7 +574,10 @@ const App = () => {
     <div className="h-full px-4 py-4 md:px-6 flex flex-col gap-4">
       <header className="flex flex-wrap items-center justify-between gap-4 shrink-0">
         <div className="flex items-center gap-4">
-          <Link to="/" className="pixel-title text-xl md:text-2xl glow-text">{t('appName')}</Link>
+          <Link to="/" className="flex items-center gap-3">
+            <img src="/logo.jpeg" alt="PK Candle" className="h-8 w-8 rounded-md border border-[var(--border)]" />
+            <span className="pixel-title text-xl md:text-2xl glow-text">{t('appName')}</span>
+          </Link>
           <span className="pixel-badge">{t('turboRoom')}</span>
           {/* no spectator mode */}
         </div>
