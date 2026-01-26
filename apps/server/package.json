@@ -1,0 +1,34 @@
+{
+  "name": "@pk-candle/server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "prebuild": "pnpm -C ../.. --filter @pk-candle/shared build",
+    "build": "tsup src/index.ts --format esm --sourcemap --out-dir dist",
+    "start": "node dist/index.js",
+    "lint": "eslint src",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@pk-candle/shared": "workspace:*",
+    "@privy-io/node": "^0.8.0",
+    "dotenv": "^16.4.7",
+    "drizzle-orm": "^0.45.1",
+    "pg": "^8.17.2",
+    "redis": "^5.10.0",
+    "ws": "^8.19.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.10",
+    "@types/pg": "^8.16.0",
+    "@types/ws": "^8.18.1",
+    "drizzle-kit": "^0.31.4",
+    "tsup": "^8.5.1",
+    "tsx": "^4.21.0"
+  }
+}
