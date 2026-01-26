@@ -151,6 +151,57 @@ const RoomPage = ({
     setAutoJoinAttempted(true);
   }, [autoJoinAttempted, isCreatingRoom, maxPlayers, name, normalizedRoomId, onJoin, requiresKey, room, roomKey, roomName, t]);
 
+  const market = room?.market ?? emptyMarket;
+  const self: PlayerState | null = room?.self ?? null;
+  const isHost = room?.hostId === room?.selfId;
+  const isLobby = room ? (room.session.status === 'LOBBY' || room.session.status === 'COUNTDOWN') : false;
+  const showLobbyPanel = room ? room.session.status !== 'LIVE' : false;
+  const showCountdownOverlay = room?.session.status === 'COUNTDOWN' && countdown !== null;
+  const showPauseOverlay = room?.session.status === 'LIVE'
+    && pauseLeftSeconds !== null
+    && pauseLeftSeconds > 0;
+  const showRespawnOverlay = Boolean(respawnNotice && respawnLeftSeconds !== null && respawnLeftSeconds > 0);
+  const showLobbyOverlay = isLobby;
+
+  const impactLines = useMemo(() => {
+    if (!globalEvent) return [];
+    const formatImpactDelta = (value: number) => {
+      const percent = value * 100;
+      const sign = percent >= 0 ? '+' : '';
+      return `${sign}${percent.toFixed(1)}%`;
+    };
+    const lines: string[] = [];
+    if (globalEvent.effect.phase) {
+      lines.push(t('eventImpactPhase', { phase: globalEvent.effect.phase }));
+    }
+    if (globalEvent.effect.volatilityDelta) {
+      lines.push(t('eventImpactVolatility', { value: formatImpactDelta(globalEvent.effect.volatilityDelta) }));
+    }
+    if (globalEvent.effect.priceMultiplier) {
+      lines.push(t('eventImpactPrice', { value: globalEvent.effect.priceMultiplier.toFixed(2) }));
+    }
+    if (!lines.length) {
+      lines.push(t('eventImpactNeutral'));
+    }
+    return lines;
+  }, [globalEvent, t]);
+
+  const eventMarqueeText = useMemo(() => {
+    return [
+      t('globalEvents'),
+      globalEvent?.title ?? t('eventPausedTitle'),
+      globalEvent?.description ?? t('eventPausedBody'),
+      ...impactLines,
+    ].join(' | ');
+  }, [globalEvent, impactLines, t]);
+
+  const rightTabs = useMemo(() => ([
+    { key: 'trade' as const, label: t('tradeTitle') },
+    { key: 'rank' as const, label: t('roomRank') },
+    { key: 'events' as const, label: t('globalEvents') },
+    ...(showLobbyPanel ? [{ key: 'lobby' as const, label: t('lobbyTitle') }] : []),
+  ]), [showLobbyPanel, t]);
+
   const handleJoin = () => {
     if (!normalizedRoomId) return;
     onJoin({
@@ -259,58 +310,7 @@ const RoomPage = ({
     );
   }
 
-  const market = room.market ?? emptyMarket;
-  const self: PlayerState | null = room.self ?? null;
   const session = room.session;
-  const isHost = room.hostId === room.selfId;
-  const isLobby = session.status === 'LOBBY' || session.status === 'COUNTDOWN';
-  const showLobbyPanel = session.status !== 'LIVE';
-
-  const showCountdownOverlay = session.status === 'COUNTDOWN' && countdown !== null;
-  const showPauseOverlay = session.status === 'LIVE'
-    && pauseLeftSeconds !== null
-    && pauseLeftSeconds > 0;
-  const showRespawnOverlay = Boolean(respawnNotice && respawnLeftSeconds !== null && respawnLeftSeconds > 0);
-  const showLobbyOverlay = isLobby;
-
-  const impactLines = useMemo(() => {
-    if (!globalEvent) return [];
-    const formatImpactDelta = (value: number) => {
-      const percent = value * 100;
-      const sign = percent >= 0 ? '+' : '';
-      return `${sign}${percent.toFixed(1)}%`;
-    };
-    const lines: string[] = [];
-    if (globalEvent.effect.phase) {
-      lines.push(t('eventImpactPhase', { phase: globalEvent.effect.phase }));
-    }
-    if (globalEvent.effect.volatilityDelta) {
-      lines.push(t('eventImpactVolatility', { value: formatImpactDelta(globalEvent.effect.volatilityDelta) }));
-    }
-    if (globalEvent.effect.priceMultiplier) {
-      lines.push(t('eventImpactPrice', { value: globalEvent.effect.priceMultiplier.toFixed(2) }));
-    }
-    if (!lines.length) {
-      lines.push(t('eventImpactNeutral'));
-    }
-    return lines;
-  }, [globalEvent, t]);
-
-  const eventMarqueeText = useMemo(() => {
-    return [
-      t('globalEvents'),
-      globalEvent?.title ?? t('eventPausedTitle'),
-      globalEvent?.description ?? t('eventPausedBody'),
-      ...impactLines,
-    ].join(' | ');
-  }, [globalEvent, impactLines, t]);
-
-  const rightTabs = useMemo(() => ([
-    { key: 'trade' as const, label: t('tradeTitle') },
-    { key: 'rank' as const, label: t('roomRank') },
-    { key: 'events' as const, label: t('globalEvents') },
-    ...(showLobbyPanel ? [{ key: 'lobby' as const, label: t('lobbyTitle') }] : []),
-  ]), [showLobbyPanel, t]);
 
   return (
     <div className="flex flex-col gap-4 relative">
