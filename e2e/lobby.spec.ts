@@ -6,7 +6,7 @@ test('create room flow loads lobby', async ({ page }) => {
   });
 
   await page.goto('/');
-  await expect(page.getByText('Create Room')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create Room' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Create Room' }).click();
   await expect(page.getByRole('button', { name: 'Enter Room' })).toBeVisible();

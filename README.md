@@ -96,8 +96,8 @@ graph TD
 - `REDIS_OP_TIMEOUT_MS` (optional, default `2000`)
 - `TICK_INTERVAL_MS` (default `1000`)
 - `SESSION_DURATION_MS` (default `180000`)
-- `COUNTDOWN_MS` (default `5000`)
-- `EVENT_PAUSE_MS` (default `5000`)
+- `COUNTDOWN_MS` (fixed at `5000`)
+- `EVENT_PAUSE_MS` (fixed at `5000`)
 
 ---
 

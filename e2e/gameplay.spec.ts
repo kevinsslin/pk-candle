@@ -22,17 +22,18 @@ test('play a short session and submit leaderboard', async ({ page }) => {
   await expect(closePosition).toBeEnabled();
   await closePosition.click();
 
-  await expect(page.getByText('Recent Trades')).toBeVisible();
-  await expect(page.getByText('Open')).toBeVisible();
-  await expect(page.getByText('Close')).toBeVisible();
+  const tradeHistory = page.getByText('Recent Trades').locator('..');
+  await expect(tradeHistory).toBeVisible();
+  await expect(tradeHistory.getByText('Open')).toBeVisible();
+  await expect(tradeHistory.getByText('Close')).toBeVisible();
 
   await page.getByRole('button', { name: /Chat/ }).click();
   await page.getByPlaceholder('Type a message').fill('hello');
   await page.getByRole('button', { name: 'Send' }).click();
-  await expect(page.getByText('hello')).toBeVisible();
-  await expect(page.locator('.danmaku-item')).toBeVisible({ timeout: 5000 });
+  await expect(page.locator('.danmaku-item.chat', { hasText: 'hello' })).toBeVisible({ timeout: 5000 });
 
   await expect(page.getByText('Game Over')).toBeVisible({ timeout: 30000 });
+  page.on('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Claim Leaderboard' }).click();
-  await expect(page.getByText('Leaderboard submitted.')).toBeVisible({ timeout: 5000 });
+  await expect(page.getByText('Leaderboard submitted.').first()).toBeVisible({ timeout: 5000 });
 });

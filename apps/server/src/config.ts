@@ -13,9 +13,8 @@ const toBool = (value: string | undefined, fallback: boolean) => {
 export const PORT = toNumber(env.PORT, 8080);
 export const TICK_INTERVAL_MS = toNumber(env.TICK_INTERVAL_MS, 1000);
 export const SESSION_DURATION_MS = toNumber(env.SESSION_DURATION_MS, 3 * 60 * 1000);
-const rawCountdownMs = toNumber(env.COUNTDOWN_MS, 5 * 1000);
-export const COUNTDOWN_MS = Math.min(rawCountdownMs, 5 * 1000);
-export const EVENT_PAUSE_MS = toNumber(env.EVENT_PAUSE_MS, 5 * 1000);
+export const COUNTDOWN_MS = 5 * 1000;
+export const EVENT_PAUSE_MS = 5 * 1000;
 export const DAYS_PER_SESSION = toNumber(env.DAYS_PER_SESSION, 6);
 export const MAX_CHAT_HISTORY = toNumber(env.MAX_CHAT_HISTORY, 120);
 export const MAX_LEADERBOARD = toNumber(env.MAX_LEADERBOARD, 50);
