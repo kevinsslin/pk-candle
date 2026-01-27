@@ -33,6 +33,7 @@ import type {
 import {
   ALLOW_ANON_PACK_EDIT,
   ALLOW_MEMORY_LEADERBOARD,
+  AUTO_SUBMIT_LEADERBOARD,
   COUNTDOWN_MS,
   DEFAULT_ROOM_PLAYERS,
   DAYS_PER_SESSION,
@@ -53,6 +54,7 @@ import {
   deletePack,
   endSession,
   fetchLeaderboard,
+  getDbStatus,
   getPackById,
   getPackRow,
   insertLeaderboardEntry,
@@ -67,7 +69,7 @@ import { getCachedLeaderboard, setCachedLeaderboard } from './redis';
 const NPC_CHAT_MIN_MS = 8000;
 const NPC_CHAT_MAX_MS = 18000;
 
-const RESPAWN_CASH_PCT = 0.4;
+const RESPAWN_BASE_PCT = 0.5;
 const RESPAWN_PAUSE_MS = 5_000;
 const PERSONAL_EVENT_DECISION_MS = 10_000;
 
@@ -95,6 +97,7 @@ type PlayerRuntime = {
     avatarUrl: string | null;
   } | null;
   leaderboardSubmitted: boolean;
+  lastLeaderboardEntry: LeaderboardEntry | null;
 };
 
 type SpectatorRuntime = {
@@ -372,6 +375,7 @@ const createPlayerRuntime = (id: string, name: string, roleKey: string, pack: Ev
     respawnCooldownEndsAt: null,
     auth: null,
     leaderboardSubmitted: false,
+    lastLeaderboardEntry: null,
   };
 };
 
@@ -393,6 +397,7 @@ const resetPlayerForSession = (room: RoomState, player: PlayerRuntime) => {
   player.respawns = 0;
   player.respawnCooldownEndsAt = null;
   player.leaderboardSubmitted = false;
+  player.lastLeaderboardEntry = null;
   player.peakCash = player.state.initialCash;
 };
 
@@ -533,17 +538,21 @@ const updatePeakCash = (player: PlayerRuntime, price: number) => {
 
 const checkLiquidation = (player: PlayerRuntime, price: number) => {
   const position = player.state.position;
-  if (!position) return;
+  if (!position) return false;
+  let liquidated = false;
 
   if (position.side === 'LONG' && price <= position.liquidationPrice) {
     player.state.history.push({ type: 'LIQUIDATION', side: 'LONG', price, time: Date.now(), pnl: -position.margin });
     player.state.position = null;
+    liquidated = true;
   }
 
   if (position.side === 'SHORT' && price >= position.liquidationPrice) {
     player.state.history.push({ type: 'LIQUIDATION', side: 'SHORT', price, time: Date.now(), pnl: -position.margin });
     player.state.position = null;
+    liquidated = true;
   }
+  return liquidated;
 };
 
 const closePosition = (player: PlayerRuntime, price: number, sendUpdate = true) => {
@@ -623,7 +632,7 @@ const respawnPlayer = (
   player.pendingEvent = null;
   player.personalEventEndsAt = null;
 
-  const respawnCash = Math.max(1, Math.floor(player.baseCash * RESPAWN_CASH_PCT));
+  const respawnCash = Math.max(1, Math.floor(player.baseCash * Math.pow(RESPAWN_BASE_PCT, player.respawns)));
   player.state.cash = respawnCash;
   player.state.stress = 0;
   player.respawnCooldownEndsAt = now + RESPAWN_PAUSE_MS;
@@ -646,7 +655,7 @@ const respawnPlayer = (
       pauseMs: RESPAWN_PAUSE_MS,
       currentCash: safeCurrentCash,
       respawnCash,
-      penaltyPct: Math.round(RESPAWN_CASH_PCT * 100),
+      penaltyPct: Math.round((respawnCash / player.baseCash) * 100),
     });
   }
 };
@@ -729,24 +738,27 @@ const endRoomSession = async (room: RoomState) => {
       ? ((sessionCash - player.state.initialCash) / player.state.initialCash) * 100
       : 0;
 
-    const canSubmit = !REQUIRE_PRIVY_FOR_LEADERBOARD || Boolean(player.auth?.userId);
-    if (!player.leaderboardSubmitted && canSubmit && isDbReady()) {
-      const inserted = await insertLeaderboardEntry({
-        sessionId: room.sessionId,
-        roomId: room.roomId,
-        playerName: player.name,
-        handle: player.auth?.handle ?? null,
-        avatarUrl: player.auth?.avatarUrl ?? null,
-        role: player.roleName,
-        cash: sessionCash,
-        peakCash,
-        roi,
-        daysSurvived: room.currentDay,
-        walletAddress: player.auth?.walletAddress ?? null,
-        userId: player.auth?.userId ?? null,
-      });
-      if (inserted) {
-        player.leaderboardSubmitted = true;
+    if (AUTO_SUBMIT_LEADERBOARD) {
+      const canSubmit = !REQUIRE_PRIVY_FOR_LEADERBOARD || Boolean(player.auth?.userId);
+      if (!player.leaderboardSubmitted && canSubmit && isDbReady()) {
+        const inserted = await insertLeaderboardEntry({
+          sessionId: room.sessionId,
+          roomId: room.roomId,
+          playerName: player.name,
+          handle: player.auth?.handle ?? null,
+          avatarUrl: player.auth?.avatarUrl ?? null,
+          role: player.roleName,
+          cash: sessionCash,
+          peakCash,
+          roi,
+          daysSurvived: room.currentDay,
+          walletAddress: player.auth?.walletAddress ?? null,
+          userId: player.auth?.userId ?? null,
+        });
+        if (inserted) {
+          player.leaderboardSubmitted = true;
+          player.lastLeaderboardEntry = inserted;
+        }
       }
     }
 
@@ -1460,11 +1472,25 @@ const handleMessage = async (ws: WebSocket, raw: string) => {
     case 'claim_leaderboard': {
       if (!player) return;
       if (player.leaderboardSubmitted) {
+        if (player.lastLeaderboardEntry) {
+          send(ws, { type: 'leaderboard_submitted', entry: player.lastLeaderboardEntry });
+          return;
+        }
         send(ws, { type: 'error', message: 'Leaderboard already submitted.' });
         return;
       }
-      if (!isDbReady() && !ALLOW_MEMORY_LEADERBOARD) {
+      const dbStatus = getDbStatus();
+      if (!dbStatus.configured && !ALLOW_MEMORY_LEADERBOARD) {
         send(ws, { type: 'error', message: 'Database not configured. Set DATABASE_URL.' });
+        return;
+      }
+      if (dbStatus.configured && !dbStatus.healthy && !ALLOW_MEMORY_LEADERBOARD) {
+        const err = dbStatus.lastError ?? '';
+        if (/relation .*leaderboard_entries/i.test(err) || /relation .*sessions/i.test(err)) {
+          send(ws, { type: 'error', message: 'Database schema missing. Run pnpm db:push.' });
+          return;
+        }
+        send(ws, { type: 'error', message: 'Database unavailable.' });
         return;
       }
       if (REQUIRE_PRIVY_FOR_LEADERBOARD && !player.auth?.userId) {
@@ -1498,31 +1524,40 @@ const handleMessage = async (ws: WebSocket, raw: string) => {
         userId: player.auth?.userId ?? null,
       };
 
-      const inserted = isDbReady()
+      const dbInsert = isDbReady()
         ? await insertLeaderboardEntry(entryPayload)
-        : insertMemoryLeaderboardEntry({
-            playerName: entryPayload.playerName,
-            handle: entryPayload.handle,
-            avatarUrl: entryPayload.avatarUrl,
-            role: entryPayload.role,
-            cash: entryPayload.cash,
-            peakCash: entryPayload.peakCash,
-            roi: entryPayload.roi,
-            daysSurvived: entryPayload.daysSurvived,
-            walletAddress: entryPayload.walletAddress,
-          });
+        : null;
+      const inserted = dbInsert ?? (ALLOW_MEMORY_LEADERBOARD
+        ? insertMemoryLeaderboardEntry({
+          playerName: entryPayload.playerName,
+          handle: entryPayload.handle,
+          avatarUrl: entryPayload.avatarUrl,
+          role: entryPayload.role,
+          cash: entryPayload.cash,
+          peakCash: entryPayload.peakCash,
+          roi: entryPayload.roi,
+          daysSurvived: entryPayload.daysSurvived,
+          walletAddress: entryPayload.walletAddress,
+        })
+        : null);
 
       if (!inserted) {
-        send(ws, { type: 'error', message: 'Failed to submit leaderboard.' });
+        send(ws, { type: 'error', message: 'Leaderboard service unavailable.' });
         return;
       }
 
       player.leaderboardSubmitted = true;
+      player.lastLeaderboardEntry = inserted;
+      if (!globalLeaderboard.find((entry) => entry.id === inserted.id)) {
+        globalLeaderboard = [inserted, ...globalLeaderboard]
+          .sort((a, b) => b.roi - a.roi)
+          .slice(0, MAX_LEADERBOARD);
+      }
+      broadcastLeaderboard();
       if (isDbReady()) {
-        await refreshLeaderboard();
-        broadcastLeaderboard();
-      } else {
-        broadcastLeaderboard();
+        void refreshLeaderboard().then(() => broadcastLeaderboard()).catch(() => {
+          // ignore refresh errors
+        });
       }
       send(ws, { type: 'leaderboard_submitted', entry: inserted });
       return;
@@ -1596,11 +1631,13 @@ const tickRooms = async () => {
     let activePlayers = 0;
     for (const player of room.players.values()) {
       if (player.state.status === 'ACTIVE') {
-        checkLiquidation(player, room.market.price);
-        checkStops(player, room.market.price);
+        const liquidated = checkLiquidation(player, room.market.price);
+        if (!liquidated) {
+          checkStops(player, room.market.price);
+        }
         const netWorth = getNetWorth(player, room.market.price);
         updatePeakCash(player, room.market.price);
-        if (netWorth <= 0) {
+        if (liquidated || netWorth <= 0) {
           respawnPlayer(room, player, 'BROKE', netWorth);
         }
       }

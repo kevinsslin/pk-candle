@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { RoomListItem } from '@pk-candle/shared';
 import { formatSessionStatus, getHowToPlaySections, useI18n } from '../i18n';
@@ -32,15 +32,17 @@ const StartScreen = ({
   const [roomKey, setRoomKey] = useState('');
   const [howToPlayOpen, setHowToPlayOpen] = useState(false);
 
+  const deferredQuery = useDeferredValue(roomQuery);
+
   const filteredRooms = useMemo(() => {
-    const query = roomQuery.trim().toLowerCase();
+    const query = deferredQuery.trim().toLowerCase();
     if (!query) return rooms;
     return rooms.filter((room) => (
       room.roomId.toLowerCase().includes(query)
       || room.displayName.toLowerCase().includes(query)
       || (room.hostName?.toLowerCase().includes(query) ?? false)
     ));
-  }, [roomQuery, rooms]);
+  }, [deferredQuery, rooms]);
 
   useEffect(() => {
     if (!prefillRoomId) return;

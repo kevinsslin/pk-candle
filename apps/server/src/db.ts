@@ -6,16 +6,62 @@ import { CORE_PACK } from '@pk-candle/shared';
 import { eventPacks, leaderboardEntries, sessions } from './schema';
 
 const databaseUrl = process.env.DATABASE_URL;
+const DB_CONNECT_TIMEOUT_MS = Number(process.env.DB_CONNECT_TIMEOUT_MS ?? 5000);
+const DB_QUERY_TIMEOUT_MS = Number(process.env.DB_QUERY_TIMEOUT_MS ?? 5000);
 
 let pool: Pool | null = null;
 let db: ReturnType<typeof drizzle> | null = null;
+let dbHealthy = Boolean(databaseUrl);
+let lastDbError: string | null = null;
 
 if (databaseUrl) {
-  pool = new Pool({ connectionString: databaseUrl });
+  pool = new Pool({
+    connectionString: databaseUrl,
+    connectionTimeoutMillis: DB_CONNECT_TIMEOUT_MS,
+    query_timeout: DB_QUERY_TIMEOUT_MS,
+  });
+  pool.on('error', (err) => {
+    dbHealthy = false;
+    console.warn('[db] pool error', err);
+  });
   db = drizzle(pool);
 }
 
-export const isDbReady = () => Boolean(db);
+export const getDbStatus = () => ({
+  configured: Boolean(databaseUrl),
+  healthy: dbHealthy,
+  lastError: lastDbError,
+});
+
+export const isDbReady = () => Boolean(db && dbHealthy);
+
+const withTimeout = async <T>(promise: Promise<T>, label: string): Promise<T> => {
+  if (!DB_QUERY_TIMEOUT_MS || DB_QUERY_TIMEOUT_MS <= 0) return promise;
+  let timer: NodeJS.Timeout | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`DB timeout: ${label}`)), DB_QUERY_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
+const runQuery = async <T>(promise: Promise<T>, label: string): Promise<T | null> => {
+  if (!db) return null;
+  try {
+    const result = await withTimeout(promise, label);
+    dbHealthy = true;
+    lastDbError = null;
+    return result;
+  } catch (err) {
+    dbHealthy = false;
+    lastDbError = err instanceof Error ? err.message : String(err);
+    console.warn('[db] query failed', err);
+    return null;
+  }
+};
 
 const toNumber = (value: unknown) => {
   if (typeof value === 'number') return value;
@@ -52,19 +98,20 @@ const toPackSummary = (
 
 export const createSession = async (roomId: string, packId: string | null) => {
   if (!db) return null;
-  const [row] = await db
-    .insert(sessions)
-    .values({ roomId, packId })
-    .returning();
+  const rows = await runQuery(
+    db.insert(sessions).values({ roomId, packId }).returning(),
+    'createSession',
+  );
+  const row = rows?.[0];
   return row?.id ?? null;
 };
 
 export const endSession = async (sessionId: string) => {
   if (!db) return;
-  await db
-    .update(sessions)
-    .set({ endedAt: new Date() })
-    .where(eq(sessions.id, sessionId));
+  await runQuery(
+    db.update(sessions).set({ endedAt: new Date() }).where(eq(sessions.id, sessionId)),
+    'endSession',
+  );
 };
 
 export const insertLeaderboardEntry = async (entry: Omit<LeaderboardEntry, 'id' | 'createdAt'> & {
@@ -73,34 +120,36 @@ export const insertLeaderboardEntry = async (entry: Omit<LeaderboardEntry, 'id' 
   userId?: string | null;
 }) => {
   if (!db) return null;
-  const [row] = await db
-    .insert(leaderboardEntries)
-    .values({
-      sessionId: entry.sessionId ?? null,
-      roomId: entry.roomId,
-      playerName: entry.playerName,
-      handle: entry.handle,
-      avatarUrl: entry.avatarUrl,
-      role: entry.role,
-      cash: entry.cash.toFixed(2),
-      peakCash: entry.peakCash.toFixed(2),
-      roi: entry.roi.toFixed(2),
-      daysSurvived: entry.daysSurvived,
-      walletAddress: entry.walletAddress,
-      userId: entry.userId ?? null,
-    })
-    .returning();
-
+  const rows = await runQuery(
+    db.insert(leaderboardEntries)
+      .values({
+        sessionId: entry.sessionId ?? null,
+        roomId: entry.roomId,
+        playerName: entry.playerName,
+        handle: entry.handle,
+        avatarUrl: entry.avatarUrl,
+        role: entry.role,
+        cash: entry.cash.toFixed(2),
+        peakCash: entry.peakCash.toFixed(2),
+        roi: entry.roi.toFixed(2),
+        daysSurvived: entry.daysSurvived,
+        walletAddress: entry.walletAddress,
+        userId: entry.userId ?? null,
+      })
+      .returning(),
+    'insertLeaderboardEntry',
+  );
+  const row = rows?.[0];
   return row ? toLeaderboardEntry(row) : null;
 };
 
 export const fetchLeaderboard = async (limit: number) => {
   if (!db) return [] as LeaderboardEntry[];
-  const rows = await db
-    .select()
-    .from(leaderboardEntries)
-    .orderBy(desc(leaderboardEntries.roi))
-    .limit(limit);
+  const rows = await runQuery(
+    db.select().from(leaderboardEntries).orderBy(desc(leaderboardEntries.roi)).limit(limit),
+    'fetchLeaderboard',
+  );
+  if (!rows) return [] as LeaderboardEntry[];
   return rows.map(toLeaderboardEntry);
 };
 
@@ -118,7 +167,11 @@ export const listPacks = async (): Promise<EventPackSummary[]> => {
     }];
   }
 
-  const rows = await db.select().from(eventPacks).orderBy(desc(eventPacks.updatedAt));
+  const rows = await runQuery(
+    db.select().from(eventPacks).orderBy(desc(eventPacks.updatedAt)),
+    'listPacks',
+  );
+  if (!rows) return [];
   const summaries = rows.map((row) => {
     const data = row.data as EventPackInput;
     return toPackSummary(row, data);
@@ -163,7 +216,11 @@ export const getPackById = async (packId: string): Promise<{ data: EventPackInpu
   }
 
   if (!db) return null;
-  const [row] = await db.select().from(eventPacks).where(eq(eventPacks.id, packId));
+  const rows = await runQuery(
+    db.select().from(eventPacks).where(eq(eventPacks.id, packId)),
+    'getPackById',
+  );
+  const row = rows?.[0];
   if (!row) return null;
   const data = row.data as EventPackInput;
   return {
@@ -175,17 +232,20 @@ export const getPackById = async (packId: string): Promise<{ data: EventPackInpu
 
 export const createPack = async (pack: EventPackInput, options: { userId?: string | null; walletAddress?: string | null; editToken?: string | null }) => {
   if (!db) return null;
-  const [row] = await db
-    .insert(eventPacks)
-    .values({
-      name: pack.name,
-      description: pack.description,
-      data: pack,
-      creatorUserId: options.userId ?? null,
-      creatorWallet: options.walletAddress ?? null,
-      editToken: options.editToken ?? null,
-    })
-    .returning();
+  const rows = await runQuery(
+    db.insert(eventPacks)
+      .values({
+        name: pack.name,
+        description: pack.description,
+        data: pack,
+        creatorUserId: options.userId ?? null,
+        creatorWallet: options.walletAddress ?? null,
+        editToken: options.editToken ?? null,
+      })
+      .returning(),
+    'createPack',
+  );
+  const row = rows?.[0];
   if (!row) return null;
   return {
     summary: toPackSummary(row, pack),
@@ -195,31 +255,40 @@ export const createPack = async (pack: EventPackInput, options: { userId?: strin
 
 export const updatePack = async (packId: string, pack: EventPackInput) => {
   if (!db) return null;
-  const [row] = await db
-    .update(eventPacks)
-    .set({
-      name: pack.name,
-      description: pack.description,
-      data: pack,
-      version: sql`version + 1`,
-      updatedAt: new Date(),
-    })
-    .where(eq(eventPacks.id, packId))
-    .returning();
+  const rows = await runQuery(
+    db.update(eventPacks)
+      .set({
+        name: pack.name,
+        description: pack.description,
+        data: pack,
+        version: sql`version + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(eventPacks.id, packId))
+      .returning(),
+    'updatePack',
+  );
+  const row = rows?.[0];
   if (!row) return null;
   return toPackSummary(row, pack);
 };
 
 export const deletePack = async (packId: string) => {
   if (!db) return false;
-  const rows = await db.delete(eventPacks).where(eq(eventPacks.id, packId)).returning();
-  return rows.length > 0;
+  const rows = await runQuery(
+    db.delete(eventPacks).where(eq(eventPacks.id, packId)).returning(),
+    'deletePack',
+  );
+  return Boolean(rows && rows.length > 0);
 };
 
 export const getPackRow = async (packId: string) => {
   if (!db) return null;
-  const [row] = await db.select().from(eventPacks).where(eq(eventPacks.id, packId));
-  return row ?? null;
+  const rows = await runQuery(
+    db.select().from(eventPacks).where(eq(eventPacks.id, packId)),
+    'getPackRow',
+  );
+  return rows?.[0] ?? null;
 };
 
 export const closeDb = async () => {

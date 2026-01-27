@@ -106,7 +106,7 @@ const RoomPage = ({
   const [roomName, setRoomName] = useState(prefillRoomName);
   const [maxPlayers, setMaxPlayers] = useState(prefillMaxPlayers);
   const [danmakuEnabled, setDanmakuEnabled] = useState(true);
-  const [rightTab, setRightTab] = useState<'trade' | 'rank' | 'events' | 'lobby'>('lobby');
+  const [rightTab, setRightTab] = useState<'trade' | 'events' | 'lobby'>('lobby');
   const [requiresKey, setRequiresKey] = useState(false);
   const [autoJoinAttempted, setAutoJoinAttempted] = useState(false);
 
@@ -197,7 +197,6 @@ const RoomPage = ({
 
   const rightTabs = useMemo(() => ([
     { key: 'trade' as const, label: t('tradeTitle') },
-    { key: 'rank' as const, label: t('roomRank') },
     { key: 'events' as const, label: t('globalEvents') },
     ...(showLobbyPanel ? [{ key: 'lobby' as const, label: t('lobbyTitle') }] : []),
   ]), [showLobbyPanel, t]);
@@ -420,7 +419,7 @@ const RoomPage = ({
             </Suspense>
           </ErrorBoundary>
 
-          <div className="grid gap-4 lg:grid-cols-[1.35fr_1fr]">
+          <div className="grid gap-4 lg:grid-cols-[0.85fr_1fr_1fr]">
             <PositionPanel
               market={market}
               player={self}
@@ -428,6 +427,9 @@ const RoomPage = ({
               disabledReason={tradeDisabledReason ?? undefined}
             />
             <TradeHistoryPanel player={self} />
+            <div className="hidden lg:block">
+              <RoomLeaderboardPanel players={room.players} price={market.price} />
+            </div>
           </div>
 
           <div className="lg:hidden">
@@ -457,10 +459,6 @@ const RoomPage = ({
               disabled={!canTrade}
               disabledReason={tradeDisabledReason ?? undefined}
             />
-          )}
-
-          {rightTab === 'rank' && (
-            <RoomLeaderboardPanel players={room.players} price={market.price} />
           )}
 
           {rightTab === 'events' && (

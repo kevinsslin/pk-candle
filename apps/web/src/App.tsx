@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import type {
   LeaderboardEntry,
@@ -9,13 +9,14 @@ import type {
   ServerMessage,
   TradeRequest,
 } from '@pk-candle/shared';
-import LobbyPage from './pages/LobbyPage';
-import RoomPage from './pages/RoomPage';
-import LeaderboardPage from './pages/LeaderboardPage';
 import EventModal from './components/EventModal';
 import GameOverScreen from './components/GameOverScreen';
 import { useI18n } from './i18n';
 import { normalizeRoomId } from './utils/room';
+
+const LobbyPage = lazy(() => import('./pages/LobbyPage'));
+const RoomPage = lazy(() => import('./pages/RoomPage'));
+const LeaderboardPage = lazy(() => import('./pages/LeaderboardPage'));
 
 const RAW_WS_URL = import.meta.env.VITE_WS_URL as string | undefined;
 const WS_URL = RAW_WS_URL || (import.meta.env.DEV ? 'ws://localhost:8080' : '');
@@ -119,7 +120,13 @@ const App = () => {
       case 'Failed to submit leaderboard.':
         return t('leaderboardSubmitFailed');
       case 'Database not configured. Set DATABASE_URL.':
-        return message;
+        return t('leaderboardDbMissing');
+      case 'Database unavailable.':
+        return t('leaderboardDbUnavailable');
+      case 'Database schema missing. Run pnpm db:push.':
+        return t('leaderboardDbSchemaMissing');
+      case 'Leaderboard service unavailable.':
+        return t('leaderboardServiceUnavailable');
       default:
         return message;
     }
@@ -678,71 +685,79 @@ const App = () => {
       )}
 
       <main className="flex-1">
-        <Routes>
-          <Route
-            path="/"
-            element={(
-              <LobbyPage
-                rooms={rooms}
-                roomsLoading={roomsLoading}
-                onRefreshRooms={fetchRooms}
-                prefillRoomId={queryRoomId}
-              />
-            )}
-          />
-          <Route
-            path="/room/:roomId"
-            element={(
-              <RoomPage
-                room={room}
-                mode={mode}
-                marketFeed={marketFeed}
-                globalEvent={globalEvent}
-                respawnNotice={respawnNotice}
-                respawnLeftSeconds={respawnLeftSeconds}
-                connection={connection}
-                countdown={countdown}
-                timeLeft={timeLeft}
-                canTrade={canTrade}
-                tradeDisabledReason={tradeDisabledReason}
-                pauseLeftSeconds={pauseLeftSeconds}
-                joinError={error}
-                onJoin={connect}
-                onSendChat={handleSendChat}
-                onTrade={handleTrade}
-                onStartCountdown={handleStartCountdown}
-                onSetRoomKey={handleSetRoomKey}
-                onSetReady={handleSetReady}
-                onKickPlayer={handleKickPlayer}
-              />
-            )}
-          />
-          <Route
-            path="/leaderboard"
-            element={(
-              <LeaderboardPage
-                entries={globalLeaderboard}
-                loading={leaderboardLoading}
-                error={leaderboardError}
-                leaderboardName={leaderboardName}
-                onUpdateName={setLeaderboardName}
-                localHistory={localHistory}
-                submittedEntryId={lastSubmittedEntryId}
-                onRefresh={fetchLeaderboard}
-              />
-            )}
-          />
-          <Route
-            path="*"
-            element={(
-              <div className="pixel-card max-w-xl mx-auto text-center">
-                <div className="pixel-title text-lg">{t('pageNotFoundTitle')}</div>
-                <p className="text-sm text-[var(--muted)] mt-2">{t('pageNotFoundBody')}</p>
-                <Link to="/" className="pixel-button mt-4 inline-flex">{t('goHome')}</Link>
-              </div>
-            )}
-          />
-        </Routes>
+        <Suspense
+          fallback={(
+            <div className="pixel-card max-w-xl mx-auto text-center">
+              <div className="pixel-title text-lg">{t('loading')}</div>
+            </div>
+          )}
+        >
+          <Routes>
+            <Route
+              path="/"
+              element={(
+                <LobbyPage
+                  rooms={rooms}
+                  roomsLoading={roomsLoading}
+                  onRefreshRooms={fetchRooms}
+                  prefillRoomId={queryRoomId}
+                />
+              )}
+            />
+            <Route
+              path="/room/:roomId"
+              element={(
+                <RoomPage
+                  room={room}
+                  mode={mode}
+                  marketFeed={marketFeed}
+                  globalEvent={globalEvent}
+                  respawnNotice={respawnNotice}
+                  respawnLeftSeconds={respawnLeftSeconds}
+                  connection={connection}
+                  countdown={countdown}
+                  timeLeft={timeLeft}
+                  canTrade={canTrade}
+                  tradeDisabledReason={tradeDisabledReason}
+                  pauseLeftSeconds={pauseLeftSeconds}
+                  joinError={error}
+                  onJoin={connect}
+                  onSendChat={handleSendChat}
+                  onTrade={handleTrade}
+                  onStartCountdown={handleStartCountdown}
+                  onSetRoomKey={handleSetRoomKey}
+                  onSetReady={handleSetReady}
+                  onKickPlayer={handleKickPlayer}
+                />
+              )}
+            />
+            <Route
+              path="/leaderboard"
+              element={(
+                <LeaderboardPage
+                  entries={globalLeaderboard}
+                  loading={leaderboardLoading}
+                  error={leaderboardError}
+                  leaderboardName={leaderboardName}
+                  onUpdateName={setLeaderboardName}
+                  localHistory={localHistory}
+                  submittedEntryId={lastSubmittedEntryId}
+                  onRefresh={fetchLeaderboard}
+                />
+              )}
+            />
+            <Route
+              path="*"
+              element={(
+                <div className="pixel-card max-w-xl mx-auto text-center">
+                  <div className="pixel-title text-lg">{t('pageNotFoundTitle')}</div>
+                  <p className="text-sm text-[var(--muted)] mt-2">{t('pageNotFoundBody')}</p>
+                  <Link to="/" className="pixel-button mt-4 inline-flex">{t('goHome')}</Link>
+                </div>
+              )}
+            />
+          </Routes>
+        </Suspense>
       </main>
 
       {personalEvent && (
