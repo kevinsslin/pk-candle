@@ -40,6 +40,7 @@ const toHttpUrl = (wsUrl: string, path: string) => {
 
 const ROOMS_URL = WS_URL ? toHttpUrl(WS_URL, '/rooms') : '';
 const LEADERBOARD_URL = WS_URL ? toHttpUrl(WS_URL, '/leaderboard') : '';
+const LEADERBOARD_SUBMIT_URL = LEADERBOARD_URL ? LEADERBOARD_URL.replace(/\/leaderboard$/, '/leaderboard/submit') : '';
 
 const loadClientId = () => {
   const existing = localStorage.getItem('pk-candle-client-id');
@@ -116,10 +117,14 @@ const App = () => {
   const mapLeaderboardError = useCallback((message: string) => {
     switch (message) {
       case 'Leaderboard already submitted.':
+      case 'Already submitted.':
         return t('leaderboardAlreadySubmitted');
       case 'Failed to submit leaderboard.':
         return t('leaderboardSubmitFailed');
+      case 'No result found for client.':
+        return t('leaderboardNoResult');
       case 'Database not configured. Set DATABASE_URL.':
+      case 'Database not configured.':
         return t('leaderboardDbMissing');
       case 'Database unavailable.':
         return t('leaderboardDbUnavailable');
@@ -231,6 +236,35 @@ const App = () => {
     } finally {
       setLeaderboardLoading(false);
     }
+  }, [t]);
+
+  const submitLeaderboardHttp = useCallback(async (playerName: string) => {
+    if (!LEADERBOARD_SUBMIT_URL) {
+      throw new Error('Leaderboard submit URL missing.');
+    }
+    const response = await fetch(LEADERBOARD_SUBMIT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clientId: clientIdRef.current,
+        playerName,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload?.error || 'Failed to submit leaderboard.');
+    }
+    const entry = payload.entry as LeaderboardEntry | undefined;
+    if (!entry) {
+      throw new Error('Failed to submit leaderboard.');
+    }
+    setLastSubmittedEntryId(entry.id);
+    setGlobalLeaderboard((prev) => {
+      if (prev.find((row) => row.id === entry.id)) return prev;
+      return [entry, ...prev].sort((a, b) => b.roi - a.roi);
+    });
+    setLeaderboardNotice(t('leaderboardSubmitted'));
+    return entry;
   }, [t]);
 
   const needsClock = Boolean(
@@ -545,10 +579,6 @@ const App = () => {
   }, [personalEvent, personalEventLeftSeconds]);
 
   const handleClaimLeaderboard = (playerName?: string) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      setLeaderboardNotice(t('leaderboardWsDisconnected'));
-      return;
-    }
     const finalName = (playerName ?? leaderboardName).trim() || t('leaderboardNameDefault');
     const confirmed = window.confirm(t('leaderboardConfirmSubmit', { name: finalName }));
     if (!confirmed) return;
@@ -557,12 +587,24 @@ const App = () => {
     if (leaderboardTimeoutRef.current) {
       window.clearTimeout(leaderboardTimeoutRef.current);
     }
-    leaderboardTimeoutRef.current = window.setTimeout(() => {
+    const useWebSocket = wsRef.current && wsRef.current.readyState === WebSocket.OPEN;
+    if (useWebSocket) {
+      leaderboardTimeoutRef.current = window.setTimeout(() => {
+        submitLeaderboardHttp(finalName).catch((err) => {
+          setLeaderboardNotice(mapLeaderboardError(err?.message ?? t('leaderboardSubmitFailed')));
+        }).finally(() => {
+          setLeaderboardClaiming(false);
+          leaderboardTimeoutRef.current = null;
+        });
+      }, 10000);
+      sendMessage({ type: 'claim_leaderboard', playerName: finalName });
+      return;
+    }
+    submitLeaderboardHttp(finalName).catch((err) => {
+      setLeaderboardNotice(mapLeaderboardError(err?.message ?? t('leaderboardSubmitFailed')));
+    }).finally(() => {
       setLeaderboardClaiming(false);
-      setLeaderboardNotice(t('leaderboardSubmitTimeout'));
-      leaderboardTimeoutRef.current = null;
-    }, 10000);
-    sendMessage({ type: 'claim_leaderboard', playerName: finalName });
+    });
   };
 
   if (MISSING_WS_URL) {

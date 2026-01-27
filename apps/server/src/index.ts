@@ -147,6 +147,31 @@ const rooms = new Map<string, RoomState>();
 const clients = new WeakMap<WebSocket, ClientContext>();
 const connections = new Map<string, WebSocket>();
 let globalLeaderboard: LeaderboardEntry[] = [];
+const recentLeaderboardResults = new Map<string, {
+  sessionId: string | null;
+  roomId: string;
+  playerName: string;
+  role: string;
+  cash: number;
+  peakCash: number;
+  roi: number;
+  daysSurvived: number;
+  handle: string | null;
+  avatarUrl: string | null;
+  walletAddress: string | null;
+  userId: string | null;
+  capturedAt: number;
+}>();
+const submittedLeaderboardClients = new Set<string>();
+const pruneLeaderboardResults = () => {
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  for (const [clientId, entry] of recentLeaderboardResults.entries()) {
+    if (entry.capturedAt < cutoff) {
+      recentLeaderboardResults.delete(clientId);
+      submittedLeaderboardClients.delete(clientId);
+    }
+  }
+};
 
 const sanitizeName = (value: string) => {
   return value.trim().slice(0, 16).replace(/[^\S\r\n]+/g, ' ') || 'Guest';
@@ -738,6 +763,22 @@ const endRoomSession = async (room: RoomState) => {
       ? ((sessionCash - player.state.initialCash) / player.state.initialCash) * 100
       : 0;
 
+    recentLeaderboardResults.set(player.id, {
+      sessionId: room.sessionId,
+      roomId: room.roomId,
+      playerName: player.name,
+      role: player.roleName,
+      cash: sessionCash,
+      peakCash,
+      roi,
+      daysSurvived: room.currentDay,
+      handle: player.auth?.handle ?? null,
+      avatarUrl: player.auth?.avatarUrl ?? null,
+      walletAddress: player.auth?.walletAddress ?? null,
+      userId: player.auth?.userId ?? null,
+      capturedAt: Date.now(),
+    });
+
     if (AUTO_SUBMIT_LEADERBOARD) {
       const canSubmit = !REQUIRE_PRIVY_FOR_LEADERBOARD || Boolean(player.auth?.userId);
       if (!player.leaderboardSubmitted && canSubmit && isDbReady()) {
@@ -758,6 +799,7 @@ const endRoomSession = async (room: RoomState) => {
         if (inserted) {
           player.leaderboardSubmitted = true;
           player.lastLeaderboardEntry = inserted;
+          submittedLeaderboardClients.add(player.id);
         }
       }
     }
@@ -776,6 +818,7 @@ const endRoomSession = async (room: RoomState) => {
   broadcastLeaderboard();
   broadcast(room, { type: 'session_status', session: buildSessionSnapshot(room) });
   broadcastRoomList();
+  pruneLeaderboardResults();
 };
 
 const maybeStartSession = async (room: RoomState) => {
@@ -1471,6 +1514,14 @@ const handleMessage = async (ws: WebSocket, raw: string) => {
     }
     case 'claim_leaderboard': {
       if (!player) return;
+      if (submittedLeaderboardClients.has(player.id)) {
+        if (player.lastLeaderboardEntry) {
+          send(ws, { type: 'leaderboard_submitted', entry: player.lastLeaderboardEntry });
+          return;
+        }
+        send(ws, { type: 'error', message: 'Leaderboard already submitted.' });
+        return;
+      }
       if (player.leaderboardSubmitted) {
         if (player.lastLeaderboardEntry) {
           send(ws, { type: 'leaderboard_submitted', entry: player.lastLeaderboardEntry });
@@ -1548,6 +1599,7 @@ const handleMessage = async (ws: WebSocket, raw: string) => {
 
       player.leaderboardSubmitted = true;
       player.lastLeaderboardEntry = inserted;
+      submittedLeaderboardClients.add(player.id);
       if (!globalLeaderboard.find((entry) => entry.id === inserted.id)) {
         globalLeaderboard = [inserted, ...globalLeaderboard]
           .sort((a, b) => b.roi - a.roi)
@@ -1684,6 +1736,102 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.startsWith('/leaderboard')) {
+    if (req.method === 'POST' && url.startsWith('/leaderboard/submit')) {
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk;
+      });
+      req.on('end', async () => {
+        try {
+          const payload = JSON.parse(body) as { clientId?: string; playerName?: string };
+          const clientId = sanitizeClientId(payload.clientId ?? '');
+          const entry = recentLeaderboardResults.get(clientId);
+          if (!entry) {
+            res.writeHead(404, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'No result found for client.' }));
+            return;
+          }
+          if (submittedLeaderboardClients.has(clientId)) {
+            res.writeHead(409, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Already submitted.' }));
+            return;
+          }
+
+          const dbStatus = getDbStatus();
+          if (!dbStatus.configured && !ALLOW_MEMORY_LEADERBOARD) {
+            res.writeHead(503, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Database not configured.' }));
+            return;
+          }
+          if (dbStatus.configured && !dbStatus.healthy && !ALLOW_MEMORY_LEADERBOARD) {
+            res.writeHead(503, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Database unavailable.' }));
+            return;
+          }
+
+          const claimedName = payload.playerName ? sanitizeName(payload.playerName) : entry.playerName;
+          const entryPayload = {
+            sessionId: entry.sessionId,
+            roomId: entry.roomId,
+            playerName: claimedName,
+            handle: entry.handle,
+            avatarUrl: entry.avatarUrl,
+            role: entry.role,
+            cash: entry.cash,
+            peakCash: entry.peakCash,
+            roi: entry.roi,
+            daysSurvived: entry.daysSurvived,
+            walletAddress: entry.walletAddress,
+            userId: entry.userId,
+          };
+          const inserted = isDbReady()
+            ? await insertLeaderboardEntry(entryPayload)
+            : insertMemoryLeaderboardEntry({
+              playerName: entryPayload.playerName,
+              handle: entryPayload.handle,
+              avatarUrl: entryPayload.avatarUrl,
+              role: entryPayload.role,
+              cash: entryPayload.cash,
+              peakCash: entryPayload.peakCash,
+              roi: entryPayload.roi,
+              daysSurvived: entryPayload.daysSurvived,
+              walletAddress: entryPayload.walletAddress,
+            });
+
+          if (!inserted) {
+            res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Failed to submit leaderboard.' }));
+            return;
+          }
+
+          submittedLeaderboardClients.add(clientId);
+          if (!globalLeaderboard.find((row) => row.id === inserted.id)) {
+            globalLeaderboard = [inserted, ...globalLeaderboard]
+              .sort((a, b) => b.roi - a.roi)
+              .slice(0, MAX_LEADERBOARD);
+          }
+          for (const room of rooms.values()) {
+            const runtime = room.players.get(clientId);
+            if (runtime) {
+              runtime.leaderboardSubmitted = true;
+              runtime.lastLeaderboardEntry = inserted;
+            }
+          }
+          broadcastLeaderboard();
+          if (isDbReady()) {
+            void refreshLeaderboard().then(() => broadcastLeaderboard()).catch(() => undefined);
+          }
+
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+          res.end(JSON.stringify({ entry: inserted }));
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+          res.end(JSON.stringify({ error: 'Invalid request.' }));
+        }
+      });
+      return;
+    }
+
     const payload = JSON.stringify({ leaderboard: globalLeaderboard });
     res.writeHead(200, {
       'Content-Type': 'application/json',
