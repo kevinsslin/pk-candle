@@ -48,6 +48,7 @@ type RoomPageProps = {
   pauseLeftSeconds: number | null;
   joinError?: string | null;
   rooms: RoomListItem[];
+  roomsLoading: boolean;
   onJoin: (payload: {
     roomId: string;
     roomName?: string;
@@ -81,6 +82,7 @@ const RoomPage = ({
   pauseLeftSeconds,
   joinError,
   rooms,
+  roomsLoading,
   onJoin,
   onSendChat,
   onTrade,
@@ -162,7 +164,13 @@ const RoomPage = ({
   const isLive = room?.session.status === 'LIVE';
   const showMobileLobbyOnly = !isLive;
 
-  const isRoomLocked = requiresKey;
+  const roomInfo = rooms.find((entry) => entry.roomId === normalizedRoomId) ?? null;
+  const lockStatus: 'locked' | 'unlocked' | 'unknown' = roomInfo
+    ? (roomInfo.isLocked ? 'locked' : 'unlocked')
+    : 'unknown';
+  const isRoomLocked = requiresKey || lockStatus === 'locked';
+  const showKeyInput = isRoomLocked || Boolean(roomKey) || lockStatus === 'unknown';
+  const nameIsValid = name.trim().length > 0;
 
   const impactLines = useMemo(() => {
     if (!globalEvent) return [];
@@ -241,7 +249,13 @@ const RoomPage = ({
         <div className="pixel-card scanline">
           <div className="pixel-title text-lg">{t('joinRoomTitle', { roomId: routeRoomId })}</div>
           <p className="text-sm text-[var(--muted)] mt-2">
-            {isRoomLocked ? t('enterRoomKey') : t('joiningRoom')}
+            {roomsLoading
+              ? t('roomLockStatusChecking')
+              : lockStatus === 'locked'
+                ? t('roomLockStatusLocked')
+                : lockStatus === 'unlocked'
+                  ? t('roomLockStatusOpen')
+                  : t('roomLockStatusChecking')}
           </p>
           <div className="mt-4 grid gap-4">
             <div>
@@ -252,10 +266,15 @@ const RoomPage = ({
                 onChange={(event) => setName(event.target.value)}
                 placeholder={t('playerNamePlaceholder')}
               />
+              {!nameIsValid && (
+                <div className="text-xs text-[var(--muted)] mt-2">{t('nameRequired')}</div>
+              )}
             </div>
-            {(isRoomLocked || roomKey) && (
+            {showKeyInput && (
               <div>
-                <label className="text-sm uppercase tracking-widest">{t('roomKeyLabel')}</label>
+                <label className="text-sm uppercase tracking-widest">
+                  {isRoomLocked ? t('roomKeyLabel') : t('roomKeyOptional')}
+                </label>
                 <input
                   className="pixel-input mt-2"
                   value={roomKey}
@@ -299,7 +318,7 @@ const RoomPage = ({
             <button
               className="pixel-button"
               onClick={handleJoin}
-              disabled={connection === 'connecting' || (isRoomLocked && !roomKey.trim())}
+              disabled={connection === 'connecting' || !nameIsValid || (isRoomLocked && !roomKey.trim())}
             >
               {connection === 'connecting' ? t('connecting') : t('enterRoom')}
             </button>

@@ -20,7 +20,7 @@ export const MAX_CHAT_HISTORY = toNumber(env.MAX_CHAT_HISTORY, 120);
 export const MAX_LEADERBOARD = toNumber(env.MAX_LEADERBOARD, 50);
 export const MAX_LEVERAGE = toNumber(env.MAX_LEVERAGE, 100);
 export const REQUIRE_PRIVY_FOR_LEADERBOARD = toBool(env.REQUIRE_PRIVY_FOR_LEADERBOARD, false);
-export const ALLOW_MEMORY_LEADERBOARD = toBool(env.ALLOW_MEMORY_LEADERBOARD, false);
+export const ALLOW_MEMORY_LEADERBOARD = toBool(env.ALLOW_MEMORY_LEADERBOARD, true);
 export const AUTO_SUBMIT_LEADERBOARD = toBool(env.AUTO_SUBMIT_LEADERBOARD, false);
 export const ALLOW_ANON_PACK_EDIT = toBool(env.ALLOW_ANON_PACK_EDIT, true);
 // MVP: allow solo start; maxPlayers is the only meaningful constraint.

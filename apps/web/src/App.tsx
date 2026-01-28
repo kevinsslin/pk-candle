@@ -124,6 +124,7 @@ const App = () => {
       case 'No result found for client.':
         return t('leaderboardNoResult');
       case 'Database not configured. Set DATABASE_URL.':
+      case 'Database not configured. Set DATABASE_URL or DB_URL.':
       case 'Database not configured.':
         return t('leaderboardDbMissing');
       case 'Database unavailable.':
@@ -765,6 +766,7 @@ const App = () => {
                   pauseLeftSeconds={pauseLeftSeconds}
                   joinError={error}
                   rooms={rooms}
+                  roomsLoading={roomsLoading}
                   onJoin={connect}
                   onSendChat={handleSendChat}
                   onTrade={handleTrade}

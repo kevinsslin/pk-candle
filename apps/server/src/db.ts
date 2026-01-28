@@ -5,7 +5,7 @@ import type { EventPackInput, EventPackSummary, LeaderboardEntry } from '@pk-can
 import { CORE_PACK } from '@pk-candle/shared';
 import { eventPacks, leaderboardEntries, sessions } from './schema';
 
-const databaseUrl = process.env.DATABASE_URL;
+const databaseUrl = process.env.DATABASE_URL ?? process.env.DB_URL;
 const DB_CONNECT_TIMEOUT_MS = Number(process.env.DB_CONNECT_TIMEOUT_MS ?? 5000);
 const DB_QUERY_TIMEOUT_MS = Number(process.env.DB_QUERY_TIMEOUT_MS ?? 5000);
 

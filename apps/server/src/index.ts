@@ -1557,7 +1557,7 @@ const handleMessage = async (ws: WebSocket, raw: string) => {
       }
       const dbStatus = getDbStatus();
       if (!dbStatus.configured && !ALLOW_MEMORY_LEADERBOARD) {
-        send(ws, { type: 'error', message: 'Database not configured. Set DATABASE_URL.' });
+        send(ws, { type: 'error', message: 'Database not configured. Set DATABASE_URL or DB_URL.' });
         return;
       }
       if (dbStatus.configured && !dbStatus.healthy && !ALLOW_MEMORY_LEADERBOARD) {
@@ -1786,7 +1786,7 @@ const server = http.createServer((req, res) => {
           const dbStatus = getDbStatus();
           if (!dbStatus.configured && !ALLOW_MEMORY_LEADERBOARD) {
             res.writeHead(503, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-            res.end(JSON.stringify({ error: 'Database not configured.' }));
+            res.end(JSON.stringify({ error: 'Database not configured. Set DATABASE_URL or DB_URL.' }));
             return;
           }
           if (dbStatus.configured && !dbStatus.healthy && !ALLOW_MEMORY_LEADERBOARD) {
