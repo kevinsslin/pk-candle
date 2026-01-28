@@ -31,6 +31,7 @@ const StartScreen = ({
   const [lockRoom, setLockRoom] = useState(false);
   const [roomKey, setRoomKey] = useState('');
   const [howToPlayOpen, setHowToPlayOpen] = useState(false);
+  const [mobilePane, setMobilePane] = useState<'create' | 'rooms'>('create');
 
   const deferredQuery = useDeferredValue(roomQuery);
 
@@ -47,6 +48,7 @@ const StartScreen = ({
   useEffect(() => {
     if (!prefillRoomId) return;
     setJoinCode(prefillRoomId.slice(0, 32));
+    setMobilePane('rooms');
   }, [prefillRoomId]);
 
   useEffect(() => {
@@ -54,6 +56,7 @@ const StartScreen = ({
     const sharedRoom = params.get('room');
     if (sharedRoom) {
       setJoinCode(sharedRoom.slice(0, 32));
+      setMobilePane('rooms');
     }
   }, []);
 
@@ -136,8 +139,25 @@ const StartScreen = ({
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1.05fr_1fr] flex-1 min-h-0">
-        <div className="flex flex-col gap-4 min-h-0">
+      <div className="md:hidden pixel-card scanline flex items-center gap-2">
+        <button
+          type="button"
+          className={`pixel-button ghost text-xs flex-1 ${mobilePane === 'create' ? 'border-[var(--accent)] text-[var(--accent)]' : ''}`}
+          onClick={() => setMobilePane('create')}
+        >
+          {t('createRoomTitle')}
+        </button>
+        <button
+          type="button"
+          className={`pixel-button ghost text-xs flex-1 ${mobilePane === 'rooms' ? 'border-[var(--accent)] text-[var(--accent)]' : ''}`}
+          onClick={() => setMobilePane('rooms')}
+        >
+          {t('activeRooms')}
+        </button>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-[1.05fr_1fr] flex-1 min-h-0 md:overflow-hidden">
+        <div className={`flex flex-col gap-4 min-h-0 ${mobilePane === 'create' ? '' : 'hidden md:flex'}`}>
           <div className="pixel-card scanline space-y-3 shrink-0">
             <div className="pixel-title text-base">{t('createRoomTitle')}</div>
             <p className="text-sm text-[var(--muted)]">
@@ -244,7 +264,7 @@ const StartScreen = ({
           )}
         </div>
 
-        <div className="flex flex-col gap-4 min-h-0">
+        <div className={`flex flex-col gap-4 min-h-0 ${mobilePane === 'rooms' ? '' : 'hidden md:flex'}`}>
           <div className="pixel-card scanline space-y-3 shrink-0">
             <div className="pixel-title text-base">{t('quickJoin')}</div>
             <p className="text-sm text-[var(--muted)]">
@@ -289,10 +309,7 @@ const StartScreen = ({
               onChange={(event) => setRoomQuery(event.target.value)}
               placeholder={t('searchRoomPlaceholder')}
             />
-            <div
-              className="flex-1 min-h-0 overflow-y-auto pr-1"
-              style={{ contentVisibility: 'auto', containIntrinsicSize: '360px' }}
-            >
+            <div className="flex-1 min-h-0 overflow-y-auto pr-1">
               {filteredRooms.length === 0 ? (
                 <div className="text-sm text-[var(--muted)]">
                   {rooms.length === 0 ? t('noPublicRooms') : t('noRoomsMatch')}
