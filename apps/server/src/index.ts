@@ -149,6 +149,7 @@ const connections = new Map<string, WebSocket>();
 let globalLeaderboard: LeaderboardEntry[] = [];
 const recentLeaderboardResults = new Map<string, {
   sessionId: string | null;
+  sessionKey: string;
   roomId: string;
   playerName: string;
   role: string;
@@ -162,7 +163,14 @@ const recentLeaderboardResults = new Map<string, {
   userId: string | null;
   capturedAt: number;
 }>();
-const submittedLeaderboardClients = new Set<string>();
+const submittedLeaderboardClients = new Map<string, string>();
+
+const getSessionKey = (room: RoomState, overrideSessionId?: string | null) => {
+  if (overrideSessionId) return overrideSessionId;
+  if (room.sessionId) return room.sessionId;
+  const startedAt = room.startedAt ?? room.createdAt;
+  return `${room.roomId}-${startedAt}`;
+};
 const pruneLeaderboardResults = () => {
   const cutoff = Date.now() - 60 * 60 * 1000;
   for (const [clientId, entry] of recentLeaderboardResults.entries()) {
@@ -763,8 +771,10 @@ const endRoomSession = async (room: RoomState) => {
       ? ((sessionCash - player.state.initialCash) / player.state.initialCash) * 100
       : 0;
 
+    const sessionKey = getSessionKey(room);
     recentLeaderboardResults.set(player.id, {
       sessionId: room.sessionId,
+      sessionKey,
       roomId: room.roomId,
       playerName: player.name,
       role: player.roleName,
@@ -799,7 +809,7 @@ const endRoomSession = async (room: RoomState) => {
         if (inserted) {
           player.leaderboardSubmitted = true;
           player.lastLeaderboardEntry = inserted;
-          submittedLeaderboardClients.add(player.id);
+          submittedLeaderboardClients.set(player.id, sessionKey);
         }
       }
     }
@@ -1514,7 +1524,9 @@ const handleMessage = async (ws: WebSocket, raw: string) => {
     }
     case 'claim_leaderboard': {
       if (!player) return;
-      if (submittedLeaderboardClients.has(player.id)) {
+      const sessionKey = getSessionKey(room);
+      const submittedSession = submittedLeaderboardClients.get(player.id);
+      if (submittedSession && submittedSession === sessionKey) {
         if (player.lastLeaderboardEntry) {
           send(ws, { type: 'leaderboard_submitted', entry: player.lastLeaderboardEntry });
           return;
@@ -1522,7 +1534,7 @@ const handleMessage = async (ws: WebSocket, raw: string) => {
         send(ws, { type: 'error', message: 'Leaderboard already submitted.' });
         return;
       }
-      if (player.leaderboardSubmitted) {
+      if (player.leaderboardSubmitted && submittedSession === sessionKey) {
         if (player.lastLeaderboardEntry) {
           send(ws, { type: 'leaderboard_submitted', entry: player.lastLeaderboardEntry });
           return;
@@ -1599,7 +1611,7 @@ const handleMessage = async (ws: WebSocket, raw: string) => {
 
       player.leaderboardSubmitted = true;
       player.lastLeaderboardEntry = inserted;
-      submittedLeaderboardClients.add(player.id);
+      submittedLeaderboardClients.set(player.id, sessionKey);
       if (!globalLeaderboard.find((entry) => entry.id === inserted.id)) {
         globalLeaderboard = [inserted, ...globalLeaderboard]
           .sort((a, b) => b.roi - a.roi)
@@ -1751,7 +1763,8 @@ const server = http.createServer((req, res) => {
             res.end(JSON.stringify({ error: 'No result found for client.' }));
             return;
           }
-          if (submittedLeaderboardClients.has(clientId)) {
+          const submittedSession = submittedLeaderboardClients.get(clientId);
+          if (submittedSession && submittedSession === entry.sessionKey) {
             res.writeHead(409, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
             res.end(JSON.stringify({ error: 'Already submitted.' }));
             return;
@@ -1804,7 +1817,7 @@ const server = http.createServer((req, res) => {
             return;
           }
 
-          submittedLeaderboardClients.add(clientId);
+          submittedLeaderboardClients.set(clientId, entry.sessionKey);
           if (!globalLeaderboard.find((row) => row.id === inserted.id)) {
             globalLeaderboard = [inserted, ...globalLeaderboard]
               .sort((a, b) => b.roi - a.roi)

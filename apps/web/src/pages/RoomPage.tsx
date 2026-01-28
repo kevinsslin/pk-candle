@@ -108,7 +108,6 @@ const RoomPage = ({
   const [danmakuEnabled, setDanmakuEnabled] = useState(true);
   const [rightTab, setRightTab] = useState<'trade' | 'events' | 'lobby'>('lobby');
   const [requiresKey, setRequiresKey] = useState(false);
-  const [autoJoinAttempted, setAutoJoinAttempted] = useState(false);
 
   useEffect(() => {
     if (!routeRoomId) return;
@@ -123,7 +122,6 @@ const RoomPage = ({
     setMaxPlayers(prefillMaxPlayers);
     setRoomKey(prefillRoomKey);
     setRequiresKey(false);
-    setAutoJoinAttempted(false);
   }, [prefillName, prefillRoomKey, prefillRoomName, prefillMaxPlayers, routeRoomId]);
 
   useEffect(() => {
@@ -138,19 +136,6 @@ const RoomPage = ({
     }
   }, [joinError]);
 
-  useEffect(() => {
-    if (room || isCreatingRoom || requiresKey || autoJoinAttempted || !normalizedRoomId) return;
-    onJoin({
-      roomId: normalizedRoomId,
-      roomName: isCreatingRoom ? (roomName.trim() || undefined) : undefined,
-      playerName: name.trim() || t('guest'),
-      roleKey: DEFAULT_ROLE_KEY,
-      roomKey: roomKey.trim() || undefined,
-      maxPlayers: isCreatingRoom ? maxPlayers : undefined,
-    });
-    setAutoJoinAttempted(true);
-  }, [autoJoinAttempted, isCreatingRoom, maxPlayers, name, normalizedRoomId, onJoin, requiresKey, room, roomKey, roomName, t]);
-
   const market = room?.market ?? emptyMarket;
   const self: PlayerState | null = room?.self ?? null;
   const isHost = room?.hostId === room?.selfId;
@@ -162,6 +147,8 @@ const RoomPage = ({
     && pauseLeftSeconds > 0;
   const showRespawnOverlay = Boolean(respawnNotice && respawnLeftSeconds !== null && respawnLeftSeconds > 0);
   const showLobbyOverlay = isLobby;
+  const isLive = room?.session.status === 'LIVE';
+  const showMobileLobbyOnly = !isLive;
 
   const impactLines = useMemo(() => {
     if (!globalEvent) return [];
@@ -312,7 +299,7 @@ const RoomPage = ({
   const session = room.session;
 
   return (
-    <div className="flex flex-col gap-4 relative">
+    <div className="flex flex-col gap-4 relative min-h-0 pb-24 lg:pb-0">
       {showRespawnOverlay && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90">
           <div className="pixel-card text-center max-w-lg">
@@ -378,7 +365,27 @@ const RoomPage = ({
         connection={connection}
       />
 
-      <div className="grid gap-4 lg:grid-cols-[2.4fr_1.1fr]">
+      {showMobileLobbyOnly && (
+        <div className="lg:hidden">
+          <LobbyPanel
+            room={room}
+            isHost={isHost && mode === 'player'}
+            countdown={countdown}
+            onStart={onStartCountdown}
+            onSetRoomKey={onSetRoomKey}
+            onSetReady={onSetReady}
+            onKickPlayer={onKickPlayer}
+          />
+        </div>
+      )}
+
+      <div
+        className={
+          showMobileLobbyOnly
+            ? 'hidden lg:grid gap-4 lg:grid-cols-[2.4fr_1.1fr]'
+            : 'grid gap-4 lg:grid-cols-[2.4fr_1.1fr]'
+        }
+      >
         <div className="flex flex-col gap-4 min-w-0">
           <ErrorBoundary
             fallback={(
@@ -504,13 +511,15 @@ const RoomPage = ({
         onToggleDanmaku={setDanmakuEnabled}
       />
 
-      <MobileTradeDock
-        market={market}
-        player={self}
-        onTrade={onTrade}
-        disabled={!canTrade}
-        disabledReason={tradeDisabledReason ?? undefined}
-      />
+      {isLive && (
+        <MobileTradeDock
+          market={market}
+          player={self}
+          onTrade={onTrade}
+          disabled={!canTrade}
+          disabledReason={tradeDisabledReason ?? undefined}
+        />
+      )}
     </div>
   );
 };
