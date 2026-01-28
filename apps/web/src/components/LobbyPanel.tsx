@@ -97,7 +97,7 @@ const LobbyPanel = ({
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
+      <div className="flex-1 min-h-0 space-y-3 md:overflow-y-auto md:pr-1">
         <div>
           <div className="text-sm uppercase tracking-widest">{t('roomLockTitle')}</div>
           <div className="mt-2 flex flex-wrap items-center gap-2">

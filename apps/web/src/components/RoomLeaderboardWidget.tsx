@@ -42,7 +42,7 @@ const RoomLeaderboardWidget = ({ players, price, max = 6 }: RoomLeaderboardWidge
       {rows.length === 0 ? (
         <div className="text-sm text-[var(--muted)]">{t('noPlayersYet')}</div>
       ) : (
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {rows.map(({ player, pnl }, index) => (
             <div key={player.id} className="pixel-card inset p-3 flex items-center gap-2 min-w-0">
               <div className="text-xs text-[var(--accent)] shrink-0">#{index + 1}</div>

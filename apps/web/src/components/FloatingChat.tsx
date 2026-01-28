@@ -93,11 +93,11 @@ const FloatingChat = ({
 
   return (
     <div
-      className={`fixed z-50 ${floatingPos ? '' : 'bottom-24 md:bottom-4 right-4'}`}
+      className={`fixed z-50 ${floatingPos ? '' : 'bottom-32 sm:bottom-24 md:bottom-4 right-3 sm:right-4'}`}
       style={floatingPos ? { left: floatingPos.x, top: floatingPos.y } : undefined}
     >
       {open ? (
-        <div ref={panelRef} className="w-[90vw] max-w-[380px] h-[70vh] max-h-[70vh]">
+        <div ref={panelRef} className="w-[92vw] max-w-[380px] h-[60vh] max-h-[60vh] md:h-[70vh] md:max-h-[70vh]">
           <div className="pixel-card flex flex-col h-full">
             <div className="flex items-center justify-between gap-2 mb-2 shrink-0">
               <div

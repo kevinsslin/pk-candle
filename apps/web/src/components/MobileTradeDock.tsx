@@ -61,7 +61,7 @@ const MobileTradeDock = ({ market, player, onTrade, disabled, disabledReason }: 
   return (
     <>
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-40">
-        <div className="px-3 pb-3 pt-2 bg-[rgba(4,7,15,0.92)] backdrop-blur border-t border-[rgba(37,52,82,0.8)]">
+        <div className="px-3 pb-[calc(12px+env(safe-area-inset-bottom))] pt-2 bg-[rgba(4,7,15,0.92)] backdrop-blur border-t border-[rgba(37,52,82,0.8)]">
           <div className="flex items-center justify-between mb-2">
             <button type="button" className="pixel-button ghost text-xs" onClick={() => setAdvancedOpen(true)}>
               {t('advanced')}
@@ -87,7 +87,7 @@ const MobileTradeDock = ({ market, player, onTrade, disabled, disabledReason }: 
       {advancedOpen && (
         <div className="md:hidden fixed inset-0 z-50 bg-black/60 flex items-end" onClick={() => setAdvancedOpen(false)}>
           <div
-            className="w-full pixel-card rounded-b-none"
+            className="w-full pixel-card rounded-b-none max-h-[78vh] overflow-y-auto pb-[calc(16px+env(safe-area-inset-bottom))]"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-3">

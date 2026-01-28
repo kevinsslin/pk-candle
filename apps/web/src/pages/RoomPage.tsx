@@ -163,6 +163,8 @@ const RoomPage = ({
   const showLobbyOverlay = isLobby;
   const isLive = room?.session.status === 'LIVE';
   const showMobileLobbyOnly = !isLive;
+  const rootPadding = isLive ? 'pb-32 md:pb-0' : 'pb-6 md:pb-0';
+  const chartHeightClass = 'h-[320px] sm:h-[380px] md:h-[60vh] md:min-h-[360px]';
 
   const roomInfo = rooms.find((entry) => entry.roomId === normalizedRoomId) ?? null;
   const lockStatus: 'locked' | 'unlocked' | 'unknown' = roomInfo
@@ -332,7 +334,7 @@ const RoomPage = ({
   const session = room.session;
 
   return (
-    <div className="flex flex-col gap-4 relative min-h-0 pb-24 lg:pb-0">
+    <div className={`flex flex-col gap-4 relative min-h-0 overflow-x-hidden ${rootPadding}`}>
       {showRespawnOverlay && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90">
           <div className="pixel-card text-center max-w-lg">
@@ -442,7 +444,7 @@ const RoomPage = ({
               <MarketChartPanel
                 market={market}
                 player={self}
-                heightClassName="h-[60vh] min-h-[360px]"
+                heightClassName={chartHeightClass}
                 overlay={(
                   <>
                     <DanmakuOverlay enabled={danmakuEnabled} messages={room.chat} />

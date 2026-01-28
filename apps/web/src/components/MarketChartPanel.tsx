@@ -279,13 +279,13 @@ const MarketChartPanel = ({ market, player, heightClassName, overlay }: MarketCh
 
   return (
     <div className="pixel-card">
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
         <div>
           <div className="pixel-title text-sm">{t('marketTitle')}</div>
           <div className="text-sm text-[var(--muted)]">{market.token?.name ?? t('loadingToken')}</div>
         </div>
-        <div className="flex flex-col items-end">
-          <div className="text-lg">{formatPrice(market.price)}</div>
+        <div className="flex flex-col items-start sm:items-end">
+          <div className="text-lg sm:text-xl">{formatPrice(market.price)}</div>
           <div className="text-xs text-[var(--muted)]">{t('phaseLabel', { phase: market.phase })}</div>
         </div>
       </div>
@@ -306,25 +306,27 @@ const MarketChartPanel = ({ market, player, heightClassName, overlay }: MarketCh
         )}
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-[10px] text-[var(--muted)]">
-        <div className="flex flex-wrap items-center gap-2">
-          {TIMEFRAMES.map((item) => (
+      <div className="mt-3 flex flex-col gap-2 text-[10px] text-[var(--muted)] sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+          <div className="flex items-center gap-2 whitespace-nowrap">
+            {TIMEFRAMES.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                className={`pixel-button ghost tiny ${timeframeKey === item.key ? 'border-[var(--accent)] text-[var(--accent)]' : ''}`}
+                onClick={() => setTimeframeKey(item.key)}
+              >
+                {t(item.labelKey)}
+              </button>
+            ))}
             <button
-              key={item.key}
               type="button"
-              className={`pixel-button ghost tiny ${timeframeKey === item.key ? 'border-[var(--accent)] text-[var(--accent)]' : ''}`}
-              onClick={() => setTimeframeKey(item.key)}
+              className="pixel-button ghost tiny"
+              onClick={() => chartRef.current?.timeScale().fitContent()}
             >
-              {t(item.labelKey)}
+              {t('fitView')}
             </button>
-          ))}
-          <button
-            type="button"
-            className="pixel-button ghost tiny"
-            onClick={() => chartRef.current?.timeScale().fitContent()}
-          >
-            {t('fitView')}
-          </button>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span>{t('localTime', { time: formatClock(new Date(localNow)) })}</span>
