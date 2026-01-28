@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
-import type { MarketEvent, PlayerState, RoomSnapshot, TradeRequest } from '@pk-candle/shared';
+import type { MarketEvent, PlayerState, RoomListItem, RoomSnapshot, TradeRequest } from '@pk-candle/shared';
 import { DEFAULT_ROLE_KEY } from '@pk-candle/shared';
 import StatusPanel from '../components/StatusPanel';
 import TradePanel from '../components/TradePanel';
@@ -47,6 +47,7 @@ type RoomPageProps = {
   tradeDisabledReason: string | null;
   pauseLeftSeconds: number | null;
   joinError?: string | null;
+  rooms: RoomListItem[];
   onJoin: (payload: {
     roomId: string;
     roomName?: string;
@@ -62,6 +63,7 @@ type RoomPageProps = {
   onSetRoomKey: (roomKey?: string) => void;
   onSetReady: (ready: boolean) => void;
   onKickPlayer: (playerId: string) => void;
+  onUpdateName: (name: string) => void;
 };
 
 const RoomPage = ({
@@ -78,6 +80,7 @@ const RoomPage = ({
   tradeDisabledReason,
   pauseLeftSeconds,
   joinError,
+  rooms,
   onJoin,
   onSendChat,
   onTrade,
@@ -85,6 +88,7 @@ const RoomPage = ({
   onSetRoomKey,
   onSetReady,
   onKickPlayer,
+  onUpdateName,
 }: RoomPageProps) => {
   const params = useParams();
   const navigate = useNavigate();
@@ -136,6 +140,14 @@ const RoomPage = ({
     }
   }, [joinError]);
 
+  useEffect(() => {
+    if (!normalizedRoomId) return;
+    const match = rooms.find((room) => room.roomId === normalizedRoomId);
+    if (match?.isLocked) {
+      setRequiresKey(true);
+    }
+  }, [normalizedRoomId, rooms]);
+
   const market = room?.market ?? emptyMarket;
   const self: PlayerState | null = room?.self ?? null;
   const isHost = room?.hostId === room?.selfId;
@@ -149,6 +161,8 @@ const RoomPage = ({
   const showLobbyOverlay = isLobby;
   const isLive = room?.session.status === 'LIVE';
   const showMobileLobbyOnly = !isLive;
+
+  const isRoomLocked = requiresKey;
 
   const impactLines = useMemo(() => {
     if (!globalEvent) return [];
@@ -227,7 +241,7 @@ const RoomPage = ({
         <div className="pixel-card scanline">
           <div className="pixel-title text-lg">{t('joinRoomTitle', { roomId: routeRoomId })}</div>
           <p className="text-sm text-[var(--muted)] mt-2">
-            {requiresKey ? t('enterRoomKey') : t('joiningRoom')}
+            {isRoomLocked ? t('enterRoomKey') : t('joiningRoom')}
           </p>
           <div className="mt-4 grid gap-4">
             <div>
@@ -239,7 +253,7 @@ const RoomPage = ({
                 placeholder={t('playerNamePlaceholder')}
               />
             </div>
-            {(requiresKey || roomKey) && (
+            {(isRoomLocked || roomKey) && (
               <div>
                 <label className="text-sm uppercase tracking-widest">{t('roomKeyLabel')}</label>
                 <input
@@ -285,7 +299,7 @@ const RoomPage = ({
             <button
               className="pixel-button"
               onClick={handleJoin}
-              disabled={connection === 'connecting' || (requiresKey && !roomKey.trim())}
+              disabled={connection === 'connecting' || (isRoomLocked && !roomKey.trim())}
             >
               {connection === 'connecting' ? t('connecting') : t('enterRoom')}
             </button>
@@ -363,6 +377,7 @@ const RoomPage = ({
         countdown={countdown}
         timeLeft={timeLeft}
         connection={connection}
+        onRename={onUpdateName}
       />
 
       {showMobileLobbyOnly && (

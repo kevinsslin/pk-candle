@@ -1500,6 +1500,19 @@ const handleMessage = async (ws: WebSocket, raw: string) => {
       broadcastRoomList();
       return;
     }
+    case 'update_name': {
+      if (!player) return;
+      const nextName = sanitizeName(message.name);
+      player.name = nextName;
+      player.state.name = nextName;
+      if (room.hostId === player.id && room.status === 'LOBBY') {
+        room.displayName = sanitizeRoomName(room.displayName, `${nextName}'s Room`);
+      }
+      sendSelfState(player);
+      broadcastPresence(room);
+      broadcastRoomList();
+      return;
+    }
     case 'create_pack':
     case 'update_pack':
     case 'delete_pack': {

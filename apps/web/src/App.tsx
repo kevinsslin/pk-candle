@@ -508,6 +508,7 @@ const App = () => {
   const handleSetRoomKey = (roomKey?: string) => sendMessage({ type: 'set_room_key', roomKey });
   const handleSetReady = (readyState: boolean) => sendMessage({ type: 'set_ready', ready: readyState });
   const handleKickPlayer = (playerId: string) => sendMessage({ type: 'kick_player', playerId });
+  const handleUpdateName = (name: string) => sendMessage({ type: 'update_name', name });
 
   const handleEventChoice = (eventId: string, choiceId: string) => {
     sendMessage({ type: 'event_choice', eventId, choiceId });
@@ -763,6 +764,7 @@ const App = () => {
                   tradeDisabledReason={tradeDisabledReason}
                   pauseLeftSeconds={pauseLeftSeconds}
                   joinError={error}
+                  rooms={rooms}
                   onJoin={connect}
                   onSendChat={handleSendChat}
                   onTrade={handleTrade}
@@ -770,6 +772,7 @@ const App = () => {
                   onSetRoomKey={handleSetRoomKey}
                   onSetReady={handleSetReady}
                   onKickPlayer={handleKickPlayer}
+                  onUpdateName={handleUpdateName}
                 />
               )}
             />

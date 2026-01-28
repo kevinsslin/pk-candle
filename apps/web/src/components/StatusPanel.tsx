@@ -1,4 +1,5 @@
 import type { MarketState, RoomSnapshot, PlayerState } from '@pk-candle/shared';
+import { useEffect, useState } from 'react';
 import { formatSessionStatus, useI18n } from '../i18n';
 
 const formatTime = (seconds: number | null) => {
@@ -24,10 +25,13 @@ type StatusPanelProps = {
   countdown: number | null;
   timeLeft: number | null;
   connection: 'idle' | 'connecting' | 'connected' | 'error';
+  onRename?: (name: string) => void;
 };
 
-const StatusPanel = ({ room, market, self, countdown, timeLeft, connection }: StatusPanelProps) => {
+const StatusPanel = ({ room, market, self, countdown, timeLeft, connection, onRename }: StatusPanelProps) => {
   const { t, lang } = useI18n();
+  const [editingName, setEditingName] = useState(false);
+  const [nextName, setNextName] = useState(self?.name ?? '');
   const pnl = calcPnl(self, market.price);
   const equity = self ? self.cash + (self.position ? self.position.margin + pnl : 0) : 0;
   const connectionLabel = {
@@ -36,6 +40,11 @@ const StatusPanel = ({ room, market, self, countdown, timeLeft, connection }: St
     connected: t('connectionConnected'),
     error: t('connectionError'),
   }[connection];
+
+  useEffect(() => {
+    if (editingName) return;
+    setNextName(self?.name ?? '');
+  }, [editingName, self?.name]);
 
   const totalRounds = 6;
   const round = Math.max(1, Math.min(totalRounds, room.session.currentDay));
@@ -61,7 +70,65 @@ const StatusPanel = ({ room, market, self, countdown, timeLeft, connection }: St
         </div>
 
         <div className="space-y-1 text-right">
-          <div className="pixel-title text-sm">{t('you')}</div>
+          <div className="flex items-center justify-end gap-2">
+            <div className="pixel-title text-sm">{t('you')}</div>
+            {self && onRename && (
+              <button
+                type="button"
+                className="pixel-button ghost text-[10px] px-2 py-1"
+                onClick={() => setEditingName((prev) => !prev)}
+                aria-label={t('editName')}
+                title={t('editName')}
+              >
+                <svg width="12" height="12" viewBox="0 0 20 20" aria-hidden="true">
+                  <path
+                    d="M13.6 2.6l3.8 3.8-9.7 9.7H3.9v-3.8l9.7-9.7z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </button>
+            )}
+          </div>
+          {self && (
+            <div className="text-sm">
+              {t('nameLabel')}: {self.name}
+            </div>
+          )}
+          {self && onRename && editingName && (
+            <div className="space-y-2">
+              <input
+                className="pixel-input text-xs"
+                value={nextName}
+                onChange={(event) => setNextName(event.target.value)}
+                placeholder={t('nameLabel')}
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="pixel-button ghost text-[10px]"
+                  onClick={() => {
+                    setEditingName(false);
+                    setNextName(self.name);
+                  }}
+                >
+                  {t('cancel')}
+                </button>
+                <button
+                  type="button"
+                  className="pixel-button secondary text-[10px]"
+                  onClick={() => {
+                    const trimmed = nextName.trim();
+                    if (trimmed && trimmed !== self.name) {
+                      onRename(trimmed);
+                    }
+                    setEditingName(false);
+                  }}
+                >
+                  {t('save')}
+                </button>
+              </div>
+            </div>
+          )}
           <div className="text-sm">{t('cash')}: {self ? self.cash.toFixed(2) : '--'} U</div>
           <div className="text-sm">{t('equity')}: {equity.toFixed(2)} U</div>
           <div className={`text-sm ${pnl >= 0 ? 'text-[var(--accent-2)]' : 'text-[var(--danger)]'}`}>

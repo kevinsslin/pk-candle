@@ -153,6 +153,7 @@ export type ClientMessage =
   | { type: 'kick_player'; playerId: string }
   | { type: 'set_pack'; packId: string }
   | { type: 'set_room_key'; roomKey?: string }
+  | { type: 'update_name'; name: string }
   | { type: 'list_packs' }
   | { type: 'get_pack'; packId: string }
   | { type: 'create_pack'; pack: EventPackInput }
