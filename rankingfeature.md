@@ -22,12 +22,12 @@
 2. **匹配隊列與房間生成**
    - 新增 queue manager（初期可 in‑memory，保留 Redis 介面）。
    - Queue ticket：`clientId`, `wallet/user`, `rating`, `enqueuedAt`, `region`, `isVerified`。
-   - 當匹配成功（6 人或 4–6 人）→ 生成私有 roomId + roomKey，自動 `join`。
+   - 當匹配成功（6 人或 2–6 人）→ 生成私有 roomId + roomKey，自動 `join`；不足名額由 bot 補位。
 
 3. **動態匹配範圍 (避免排不到)**
    - 初始範圍：同段位或 `±50 rating`。
    - 超過 30s：允許跨 1 段位。
-   - 超過 60s：允許 4–6 人開局（Bot 補位為可選、預設關閉）。
+   - 超過 60s：允許 2–6 人開局（Bot 補位預設開啟）。
 
 4. **排位積分模型 (6 人 FFA)**
    - 轉換名次為分數：`score = (N - rank) / (N - 1)`。
@@ -77,4 +77,4 @@
 - **最終加減分**：`K * (score - expected)` 再加上一點名次 bonus，讓名次更直觀。
 
 ## Open Questions (需對齊)
-- Bot 補位是否要開？若開，是否只在 60s 之後才啟用？（目前預設關閉）
+- 低人數排位的 bot 強度是否需要做更細的分級（與段位/Rating 連動）？

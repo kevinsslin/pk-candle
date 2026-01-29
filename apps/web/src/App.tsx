@@ -2,6 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { DEFAULT_ROLE_KEY } from '@pk-candle/shared';
 import type {
+  AdminMetrics,
   LeaderboardEntry,
   MarketEvent,
   PersonalEvent,
@@ -25,6 +26,7 @@ const LobbyPage = lazy(() => import('./pages/LobbyPage'));
 const RoomPage = lazy(() => import('./pages/RoomPage'));
 const LeaderboardPage = lazy(() => import('./pages/LeaderboardPage'));
 const RankedLeaderboardPage = lazy(() => import('./pages/RankedLeaderboardPage'));
+const AdminDashboardPage = lazy(() => import('./pages/AdminDashboardPage'));
 
 const RAW_WS_URL = import.meta.env.VITE_WS_URL as string | undefined;
 const WS_URL = RAW_WS_URL || (import.meta.env.DEV ? 'ws://localhost:8080' : '');
@@ -50,6 +52,9 @@ const ROOMS_URL = WS_URL ? toHttpUrl(WS_URL, '/rooms') : '';
 const LEADERBOARD_URL = WS_URL ? toHttpUrl(WS_URL, '/leaderboard') : '';
 const LEADERBOARD_SUBMIT_URL = LEADERBOARD_URL ? LEADERBOARD_URL.replace(/\/leaderboard$/, '/leaderboard/submit') : '';
 const RANKED_LEADERBOARD_URL = WS_URL ? toHttpUrl(WS_URL, '/ranked/leaderboard') : '';
+const ADMIN_METRICS_URL = WS_URL ? toHttpUrl(WS_URL, '/admin/metrics') : '';
+const SIWE_STATEMENT =
+  'Sign in with Ethereum to verify your wallet. No transactions will be sent.';
 
 const loadClientId = () => {
   const existing = localStorage.getItem('pk-candle-client-id');
@@ -123,6 +128,9 @@ const App = () => {
   const [rankedLeaderboard, setRankedLeaderboard] = useState<RankedLeaderboardEntry[]>([]);
   const [rankedLeaderboardLoading, setRankedLeaderboardLoading] = useState(false);
   const [rankedLeaderboardError, setRankedLeaderboardError] = useState<string | null>(null);
+  const [adminMetrics, setAdminMetrics] = useState<AdminMetrics | null>(null);
+  const [adminMetricsLoading, setAdminMetricsLoading] = useState(false);
+  const [adminMetricsError, setAdminMetricsError] = useState<string | null>(null);
   const [rankedVerifiedAddress, setRankedVerifiedAddress] = useState<string | null>(null);
   const rankedPlayerNameRef = useRef<string>('');
   const languageRef = useRef<HTMLDivElement | null>(null);
@@ -290,6 +298,26 @@ const App = () => {
       setRankedLeaderboard([]);
     } finally {
       setRankedLeaderboardLoading(false);
+    }
+  }, [t]);
+
+  const fetchAdminMetrics = useCallback(async () => {
+    if (!ADMIN_METRICS_URL) {
+      setAdminMetricsError(t('adminMetricsLoadFailed'));
+      return;
+    }
+    setAdminMetricsLoading(true);
+    setAdminMetricsError(null);
+    try {
+      const response = await fetch(ADMIN_METRICS_URL);
+      if (!response.ok) throw new Error('admin-metrics');
+      const payload = await response.json() as { metrics?: AdminMetrics };
+      setAdminMetrics(payload.metrics ?? null);
+    } catch {
+      setAdminMetricsError(t('adminMetricsLoadFailed'));
+      setAdminMetrics(null);
+    } finally {
+      setAdminMetricsLoading(false);
     }
   }, [t]);
 
@@ -675,7 +703,7 @@ const App = () => {
       const siweMessage = new SiweMessage({
         domain: window.location.host,
         address,
-        statement: t('rankedSiweStatement'),
+        statement: SIWE_STATEMENT,
         uri: window.location.origin,
         version: '1',
         chainId,
@@ -876,6 +904,16 @@ const App = () => {
           >
             {t('leaderboard')}
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (room) leaveRoom();
+              navigate('/admin');
+            }}
+            className="pixel-button ghost text-xs"
+          >
+            {t('adminNav')}
+          </button>
           {room && (
             <button className="pixel-button ghost text-xs" onClick={leaveRoom}>
               {t('leaveRoom')}
@@ -1037,6 +1075,17 @@ const App = () => {
                   loading={rankedLeaderboardLoading}
                   error={rankedLeaderboardError}
                   onRefresh={fetchRankedLeaderboard}
+                />
+              )}
+            />
+            <Route
+              path="/admin"
+              element={(
+                <AdminDashboardPage
+                  metrics={adminMetrics}
+                  loading={adminMetricsLoading}
+                  error={adminMetricsError}
+                  onRefresh={fetchAdminMetrics}
                 />
               )}
             />

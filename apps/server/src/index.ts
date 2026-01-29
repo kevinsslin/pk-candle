@@ -17,6 +17,7 @@ import {
 import type {
   ChatMessage,
   ClientMessage,
+  AdminMetrics,
   EventPack,
   EventPackSummary,
   LeaderboardEntry,
@@ -56,6 +57,7 @@ import {
   TICK_INTERVAL_MS,
   RANKED_ALLOW_CROSS_TIER_AFTER_MS,
   RANKED_ALLOW_SHORT_START_AFTER_MS,
+  RANKED_ENABLE_BOTS,
   RANKED_MAX_PLAYERS,
   RANKED_MIN_PLAYERS,
   RANKED_QUEUE_TICK_MS,
@@ -69,6 +71,7 @@ import {
   deletePack,
   endSession,
   ensureRankedSeason,
+  fetchAdminMetricsTotals,
   fetchRankedLeaderboard,
   fetchLeaderboard,
   getOrCreatePlayerRating,
@@ -89,6 +92,8 @@ import { getCachedLeaderboard, setCachedLeaderboard } from './redis';
 
 const NPC_CHAT_MIN_MS = 8000;
 const NPC_CHAT_MAX_MS = 18000;
+const BOT_ACTION_MIN_MS = 6000;
+const BOT_ACTION_MAX_MS = 14000;
 
 const RESPAWN_BASE_PCT = 0.5;
 const RESPAWN_PAUSE_MS = 5_000;
@@ -102,6 +107,8 @@ type PlayerRuntime = {
   baseCash: number;
   peakCash: number;
   state: PlayerState;
+  isBot: boolean;
+  nextBotActionAt: number | null;
   pendingEvent: PersonalEvent | null;
   personalEventEndsAt: number | null;
   recentPersonalEvents: string[];
@@ -161,6 +168,7 @@ type RoomState = {
     seasonId: string;
     matchId: string;
     participants: Set<string>;
+    requiredPlayers: number;
   };
 };
 
@@ -352,6 +360,10 @@ const buildPackSummary = (pack: EventPack): EventPackSummary => ({
   isCore: pack.id === CORE_PACK.id,
 });
 
+const getOrderedPlayers = (room: RoomState) => (
+  Array.from(room.players.values()).sort((a, b) => Number(a.isBot) - Number(b.isBot))
+);
+
 const buildPlayerSummary = (room: RoomState, player: PlayerRuntime): PlayerSummary => ({
   id: player.id,
   name: player.name,
@@ -366,7 +378,7 @@ const buildPlayerSummary = (room: RoomState, player: PlayerRuntime): PlayerSumma
   position: player.state.position,
   ready: player.state.ready,
   isHost: room.hostId === player.id,
-  online: connections.has(player.id),
+  online: player.isBot ? true : connections.has(player.id),
 });
 
 const buildSpectatorSummary = (spectator: SpectatorRuntime): RoomSnapshot['spectators'][number] => ({
@@ -400,7 +412,7 @@ const buildRoomSnapshot = (room: RoomState, selfId: string): RoomSnapshot => {
     hostId: room.hostId,
     selfId,
     self,
-    players: Array.from(room.players.values()).map((player) => buildPlayerSummary(room, player)),
+    players: getOrderedPlayers(room).map((player) => buildPlayerSummary(room, player)),
     spectators: Array.from(room.spectators.values()).map((spectator) => buildSpectatorSummary(spectator)),
     isLocked: Boolean(room.passcodeHash),
     market: room.market,
@@ -506,6 +518,8 @@ const createPlayerRuntime = (id: string, name: string, roleKey: string, pack: Ev
     baseCash: role.initialCash,
     peakCash: role.initialCash,
     state,
+    isBot: false,
+    nextBotActionAt: null,
     pendingEvent: null,
     personalEventEndsAt: null,
     recentPersonalEvents: [],
@@ -519,6 +533,16 @@ const createPlayerRuntime = (id: string, name: string, roleKey: string, pack: Ev
     leaderboardSubmitted: false,
     lastLeaderboardEntry: null,
   };
+};
+
+const createBotRuntime = (room: RoomState, index: number) => {
+  const botId = `bot-${randomUUID().slice(0, 8)}`;
+  const botName = `BOT ${index}`;
+  const bot = createPlayerRuntime(botId, botName, DEFAULT_ROLE_KEY, room.pack);
+  bot.isBot = true;
+  bot.state.ready = true;
+  bot.nextBotActionAt = Date.now() + randomBetween(BOT_ACTION_MIN_MS, BOT_ACTION_MAX_MS);
+  return bot;
 };
 
 const createSpectatorRuntime = (id: string, name: string): SpectatorRuntime => ({
@@ -604,7 +628,7 @@ const applyEventPause = (room: RoomState, ms: number) => {
 };
 
 const broadcastPresence = (room: RoomState) => {
-  const players = Array.from(room.players.values()).map((player) => buildPlayerSummary(room, player));
+  const players = getOrderedPlayers(room).map((player) => buildPlayerSummary(room, player));
   const spectators = Array.from(room.spectators.values()).map((spectator) => buildSpectatorSummary(spectator));
   broadcast(room, { type: 'presence', players, spectators, hostId: room.hostId });
 };
@@ -685,6 +709,8 @@ const getKFactor = (matchesPlayed: number, rating: number) => {
 
 const getPlacementBonus = (playerCount: number, placement: number) => {
   const bonuses: Record<number, number[]> = {
+    2: [4, -4],
+    3: [5, 0, -5],
     4: [6, 2, -2, -6],
     5: [7, 3, 0, -3, -7],
     6: [8, 4, 1, -1, -4, -8],
@@ -896,6 +922,39 @@ const broadcastLeaderboard = () => {
   }
 };
 
+const buildAdminMetrics = async (): Promise<AdminMetrics> => {
+  const totals = await fetchAdminMetricsTotals();
+  const totalGames = totals?.totalGames ?? 0;
+  const rankedMatches = totals?.rankedMatches ?? 0;
+  const rankedParticipants = totals?.rankedParticipants ?? 0;
+  const leaderboardEntries = totals?.leaderboardEntries ?? 0;
+
+  let liveRooms = 0;
+  let rankedRooms = 0;
+  for (const room of rooms.values()) {
+    if (room.status === 'LIVE') liveRooms += 1;
+    if (room.mode === 'ranked') rankedRooms += 1;
+  }
+
+  return {
+    generatedAt: Date.now(),
+    totals: {
+      totalGames,
+      rankedMatches,
+      rankedParticipants,
+      leaderboardEntries,
+      playerStarts: rankedParticipants + leaderboardEntries,
+    },
+    live: {
+      activePlayers: connections.size,
+      activeRooms: rooms.size,
+      liveRooms,
+      rankedRooms,
+      rankedQueue: rankedQueue.size,
+    },
+  };
+};
+
 type RankedSessionEntry = {
   player: PlayerRuntime;
   walletAddress: string;
@@ -1054,6 +1113,10 @@ const endRoomSession = async (room: RoomState) => {
     const roi = player.state.initialCash > 0
       ? ((sessionCash - player.state.initialCash) / player.state.initialCash) * 100
       : 0;
+
+    if (player.isBot) {
+      continue;
+    }
 
     const sessionKey = getSessionKey(room);
     recentLeaderboardResults.set(player.id, {
@@ -1433,6 +1496,52 @@ const handleTrade = (room: RoomState, player: PlayerRuntime, trade: TradeRequest
   }
 };
 
+const scheduleNextBotAction = (player: PlayerRuntime, now: number) => {
+  player.nextBotActionAt = now + randomBetween(BOT_ACTION_MIN_MS, BOT_ACTION_MAX_MS);
+};
+
+const maybeRunBotAction = (room: RoomState, player: PlayerRuntime, now: number) => {
+  if (!player.isBot) return;
+  if (player.state.status !== 'ACTIVE') return;
+  if (player.respawnCooldownEndsAt && now < player.respawnCooldownEndsAt) return;
+  if (player.pendingEvent && player.personalEventEndsAt && now < player.personalEventEndsAt) return;
+  if (player.nextBotActionAt && now < player.nextBotActionAt) return;
+
+  if (!player.state.position) {
+    const side = Math.random() < 0.5 ? 'LONG' : 'SHORT';
+    const leverage = randomBetween(2, 6);
+    const sizePercent = randomBetween(20, 61);
+    const takeProfitPct = randomBetween(2, 6);
+    const stopLossPct = randomBetween(1, 5);
+    handleTrade(room, player, {
+      action: 'OPEN',
+      side,
+      leverage,
+      sizePercent,
+      takeProfitPct,
+      stopLossPct,
+    });
+    scheduleNextBotAction(player, now);
+    return;
+  }
+
+  if (Math.random() < 0.5) {
+    handleTrade(room, player, { action: 'CLOSE' });
+  } else {
+    const side = player.state.position.side;
+    const leverage = randomBetween(2, 5);
+    const sizePercent = randomBetween(10, 36);
+    handleTrade(room, player, {
+      action: 'OPEN',
+      side,
+      leverage,
+      sizePercent,
+    });
+  }
+
+  scheduleNextBotAction(player, now);
+};
+
 const buildRankedQueueStatus = (ticket: RankedTicket, now: number): RankedQueueStatus => {
   const waitMs = now - ticket.enqueuedAt;
   const crossTier = waitMs >= RANKED_ALLOW_CROSS_TIER_AFTER_MS;
@@ -1458,6 +1567,7 @@ const buildRankedQueueStatus = (ticket: RankedTicket, now: number): RankedQueueS
     rangeMin: Math.max(MIN_RATING, rangeMin),
     rangeMax,
     crossTier,
+    queueSize: rankedQueue.size,
   };
 };
 
@@ -1477,19 +1587,30 @@ const createRankedRoomForGroup = async (group: RankedTicket[]) => {
   const roomId = `ranked-${randomUUID().slice(0, 8)}`;
   const roomKey = randomUUID().replace(/-/g, '').slice(0, 8);
   const matchId = randomUUID();
+  const requiredPlayers = group.length;
+  const targetPlayers = RANKED_ENABLE_BOTS ? RANKED_MAX_PLAYERS : requiredPlayers;
+  const botCount = Math.max(0, targetPlayers - requiredPlayers);
   const participants = new Set(group.map((ticket) => ticket.walletAddress.toLowerCase()));
 
   const room = createRoom(roomId, 'Ranked Match', CORE_PACK, {
-    maxPlayers: group.length,
+    maxPlayers: targetPlayers,
     passcodeHash: hashRoomKey(roomKey),
     mode: 'ranked',
     ranked: {
       seasonId: RANKED_SEASON_ID,
       matchId,
       participants,
+      requiredPlayers,
     },
   });
   rooms.set(roomId, room);
+
+  if (botCount > 0) {
+    for (let i = 0; i < botCount; i += 1) {
+      const bot = createBotRuntime(room, i + 1);
+      room.players.set(bot.id, bot);
+    }
+  }
 
   for (const ticket of group) {
     send(ticket.ws, {
@@ -1621,7 +1742,8 @@ const handleJoin = async (ws: WebSocket, message: ClientMessage & { type: 'join'
   if (room.mode === 'ranked') {
     player.state.ready = true;
     const activeCount = getActivePlayerCount(room);
-    if (room.status === 'LOBBY' && activeCount >= room.maxPlayers) {
+    const requiredPlayers = room.ranked?.requiredPlayers ?? room.maxPlayers;
+    if (room.status === 'LOBBY' && activeCount >= requiredPlayers) {
       room.status = 'COUNTDOWN';
       room.countdownEndsAt = Date.now() + COUNTDOWN_MS;
       broadcast(room, { type: 'session_status', session: buildSessionSnapshot(room) });
@@ -1850,6 +1972,7 @@ const handleMessage = async (ws: WebSocket, raw: string) => {
       rangeMin: 0,
       rangeMax: 0,
       crossTier: false,
+      queueSize: rankedQueue.size,
     } });
     return;
   }
@@ -2243,6 +2366,9 @@ const tickRooms = async () => {
 
       maybeResolveExpiredPersonalEvent(room, player, now);
       maybeSendPersonalEvent(room, player);
+      if (RANKED_ENABLE_BOTS && player.isBot) {
+        maybeRunBotAction(room, player, now);
+      }
       sendSelfState(player);
     }
 
@@ -2388,6 +2514,17 @@ const server = http.createServer(async (req, res) => {
   if (url.startsWith('/ranked/leaderboard')) {
     await refreshRankedLeaderboard();
     const payload = JSON.stringify({ leaderboard: rankedLeaderboard });
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+    });
+    res.end(payload);
+    return;
+  }
+
+  if (url.startsWith('/admin/metrics')) {
+    const metrics = await buildAdminMetrics();
+    const payload = JSON.stringify({ metrics });
     res.writeHead(200, {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',

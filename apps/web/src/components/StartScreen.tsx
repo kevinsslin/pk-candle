@@ -194,6 +194,11 @@ const StartScreen = ({
             {t('rankedQueueing', { seconds: queueSeconds, range: queueRange })}
           </div>
         )}
+        {rankedQueueStatus && (
+          <div className="text-xs text-[var(--muted)]">
+            {t('rankedQueueCount', { count: rankedQueueStatus.queueSize })}
+          </div>
+        )}
         {rankedQueueError && (
           <div className="text-xs text-[var(--danger)]">{rankedQueueError}</div>
         )}

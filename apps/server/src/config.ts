@@ -30,10 +30,10 @@ export const DEFAULT_ROOM_PLAYERS = toNumber(env.DEFAULT_ROOM_PLAYERS, 6);
 
 export const RANKED_SEASON_ID = env.RANKED_SEASON_ID ?? 'season-1';
 export const RANKED_START_RATING = toNumber(env.RANKED_START_RATING, 1000);
-export const RANKED_MIN_PLAYERS = toNumber(env.RANKED_MIN_PLAYERS, 4);
+export const RANKED_MIN_PLAYERS = toNumber(env.RANKED_MIN_PLAYERS, 2);
 export const RANKED_MAX_PLAYERS = toNumber(env.RANKED_MAX_PLAYERS, 6);
 export const RANKED_RANGE_BASE = toNumber(env.RANKED_RANGE_BASE, 50);
 export const RANKED_ALLOW_CROSS_TIER_AFTER_MS = toNumber(env.RANKED_ALLOW_CROSS_TIER_AFTER_MS, 30_000);
 export const RANKED_ALLOW_SHORT_START_AFTER_MS = toNumber(env.RANKED_ALLOW_SHORT_START_AFTER_MS, 60_000);
 export const RANKED_QUEUE_TICK_MS = toNumber(env.RANKED_QUEUE_TICK_MS, 1000);
-export const RANKED_ENABLE_BOTS = toBool(env.RANKED_ENABLE_BOTS, false);
+export const RANKED_ENABLE_BOTS = toBool(env.RANKED_ENABLE_BOTS, true);

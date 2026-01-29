@@ -5,6 +5,13 @@ import type { EventPackInput, EventPackSummary, LeaderboardEntry } from '@pk-can
 import { CORE_PACK } from '@pk-candle/shared';
 import { eventPacks, leaderboardEntries, playerRatings, rankedMatchPlayers, rankedMatches, rankedSeasons, sessions } from './schema';
 
+type AdminMetricsTotals = {
+  totalGames: number;
+  rankedMatches: number;
+  rankedParticipants: number;
+  leaderboardEntries: number;
+};
+
 const databaseUrl = process.env.DATABASE_URL ?? process.env.DB_URL;
 const DB_CONNECT_TIMEOUT_MS = Number(process.env.DB_CONNECT_TIMEOUT_MS ?? 5000);
 const DB_QUERY_TIMEOUT_MS = Number(process.env.DB_QUERY_TIMEOUT_MS ?? 5000);
@@ -364,6 +371,38 @@ export const fetchRankedLeaderboard = async (seasonId: string, limit: number): P
     matchesPlayed: row.matchesPlayed,
     updatedAt: row.updatedAt ? row.updatedAt.getTime() : Date.now(),
   }));
+};
+
+const countRows = async (query: Promise<Array<{ count: number }>> | null, label: string) => {
+  if (!query) return 0;
+  const rows = await runQuery(query, label);
+  return Number(rows?.[0]?.count ?? 0);
+};
+
+export const fetchAdminMetricsTotals = async (): Promise<AdminMetricsTotals | null> => {
+  if (!db) return null;
+  const totalGames = await countRows(
+    db.select({ count: sql<number>`count(*)` }).from(sessions),
+    'metrics:sessions',
+  );
+  const rankedMatchesCount = await countRows(
+    db.select({ count: sql<number>`count(*)` }).from(rankedMatches),
+    'metrics:ranked_matches',
+  );
+  const rankedParticipants = await countRows(
+    db.select({ count: sql<number>`count(*)` }).from(rankedMatchPlayers),
+    'metrics:ranked_match_players',
+  );
+  const leaderboardCount = await countRows(
+    db.select({ count: sql<number>`count(*)` }).from(leaderboardEntries),
+    'metrics:leaderboard_entries',
+  );
+  return {
+    totalGames,
+    rankedMatches: rankedMatchesCount,
+    rankedParticipants,
+    leaderboardEntries: leaderboardCount,
+  };
 };
 
 export const listPacks = async (): Promise<EventPackSummary[]> => {

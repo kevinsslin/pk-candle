@@ -94,6 +94,25 @@ export type RankedQueueStatus = {
   rangeMin: number;
   rangeMax: number;
   crossTier: boolean;
+  queueSize: number;
+};
+
+export type AdminMetrics = {
+  generatedAt: number;
+  totals: {
+    totalGames: number;
+    rankedMatches: number;
+    rankedParticipants: number;
+    leaderboardEntries: number;
+    playerStarts: number;
+  };
+  live: {
+    activePlayers: number;
+    activeRooms: number;
+    liveRooms: number;
+    rankedRooms: number;
+    rankedQueue: number;
+  };
 };
 
 export type PlayerState = {
