@@ -1,7 +1,8 @@
 import type { FormEvent } from 'react';
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { RoomListItem } from '@pk-candle/shared';
+import type { RankedQueueStatus, RoomListItem } from '@pk-candle/shared';
+import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { formatSessionStatus, getHowToPlaySections, useI18n } from '../i18n';
 import { normalizeRoomId } from '../utils/room';
 
@@ -10,6 +11,12 @@ type StartScreenProps = {
   roomsLoading?: boolean;
   onRefreshRooms?: () => void;
   prefillRoomId?: string | null;
+  rankedQueueStatus?: RankedQueueStatus | null;
+  rankedQueueError?: string | null;
+  rankedVerifiedAddress?: string | null;
+  onRankedVerify?: () => void;
+  onRankedJoin?: (playerName: string) => void;
+  onRankedCancel?: () => void;
 };
 
 const generateRoomCode = () => Math.random().toString(36).slice(2, 8);
@@ -19,6 +26,12 @@ const StartScreen = ({
   roomsLoading,
   onRefreshRooms,
   prefillRoomId,
+  rankedQueueStatus,
+  rankedQueueError,
+  rankedVerifiedAddress,
+  onRankedVerify,
+  onRankedJoin,
+  onRankedCancel,
 }: StartScreenProps) => {
   const { t, lang } = useI18n();
   const navigate = useNavigate();
@@ -114,6 +127,15 @@ const StartScreen = ({
     navigate(buildRoomUrl(resolvedJoinCode, false));
   };
 
+  const queueSeconds = rankedQueueStatus ? Math.floor(rankedQueueStatus.waitMs / 1000) : 0;
+  const queueRange = rankedQueueStatus
+    ? (
+      rankedQueueStatus.rangeMax >= 1_000_000
+        ? `${rankedQueueStatus.rangeMin}+`
+        : `${rankedQueueStatus.rangeMin}–${rankedQueueStatus.rangeMax}`
+    )
+    : '';
+
   return (
     <div className="h-full max-w-6xl mx-auto flex flex-col gap-4">
       <div className="pixel-card scanline shrink-0">
@@ -136,6 +158,59 @@ const StartScreen = ({
             <span className="pixel-badge">{t('startBadgeLobbies')}</span>
             <span className="pixel-badge">{t('startBadgeLeaderboard')}</span>
           </div>
+        </div>
+      </div>
+
+      <div className="pixel-card scanline shrink-0 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="pixel-title text-base">{t('rankedTitle')}</div>
+            <p className="text-sm text-[var(--muted)]">{t('rankedSubtitle')}</p>
+          </div>
+          <button
+            type="button"
+            className="pixel-button ghost text-xs"
+            onClick={() => navigate('/ranked')}
+          >
+            {t('rankedLeaderboardNav')}
+          </button>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <ConnectButton showBalance={false} accountStatus="address" chainStatus="icon" />
+          <button
+            type="button"
+            className="pixel-button text-xs"
+            onClick={onRankedVerify}
+            disabled={!onRankedVerify || Boolean(rankedVerifiedAddress)}
+          >
+            {rankedVerifiedAddress ? t('rankedVerified') : t('rankedVerifyWallet')}
+          </button>
+        </div>
+        <div className="text-xs text-[var(--muted)]">
+          {t('rankedVerifyHint')}
+        </div>
+        {rankedQueueStatus && (
+          <div className="text-sm text-[var(--muted)]">
+            {t('rankedQueueing', { seconds: queueSeconds, range: queueRange })}
+          </div>
+        )}
+        {rankedQueueError && (
+          <div className="text-xs text-[var(--danger)]">{rankedQueueError}</div>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="pixel-button"
+            onClick={() => onRankedJoin?.(name)}
+            disabled={!onRankedJoin || Boolean(rankedQueueStatus)}
+          >
+            {t('rankedJoinQueue')}
+          </button>
+          {rankedQueueStatus && (
+            <button type="button" className="pixel-button ghost" onClick={onRankedCancel}>
+              {t('rankedCancelQueue')}
+            </button>
+          )}
         </div>
       </div>
 

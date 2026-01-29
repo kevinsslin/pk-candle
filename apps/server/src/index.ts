@@ -2,6 +2,7 @@ import 'dotenv/config';
 import http from 'http';
 import { createHash, randomUUID } from 'crypto';
 import { WebSocket, WebSocketServer } from 'ws';
+import { SiweMessage } from 'siwe';
 import {
   CORE_PACK,
   DEFAULT_ROLE_KEY,
@@ -24,7 +25,13 @@ import type {
   PersonalEvent,
   PlayerState,
   PlayerSummary,
+  RankedLeaderboardEntry,
+  RankedMatchResult,
+  RankedQueueStatus,
+  RankDivision,
+  RankTier,
   RoomListItem,
+  RoomMode,
   RoomSnapshot,
   SessionSnapshot,
   SessionStatus,
@@ -47,19 +54,33 @@ import {
   REQUIRE_PRIVY_FOR_LEADERBOARD,
   SESSION_DURATION_MS,
   TICK_INTERVAL_MS,
+  RANKED_ALLOW_CROSS_TIER_AFTER_MS,
+  RANKED_ALLOW_SHORT_START_AFTER_MS,
+  RANKED_MAX_PLAYERS,
+  RANKED_MIN_PLAYERS,
+  RANKED_QUEUE_TICK_MS,
+  RANKED_RANGE_BASE,
+  RANKED_SEASON_ID,
+  RANKED_START_RATING,
 } from './config';
 import {
   createPack,
   createSession,
   deletePack,
   endSession,
+  ensureRankedSeason,
+  fetchRankedLeaderboard,
   fetchLeaderboard,
+  getOrCreatePlayerRating,
   getDbStatus,
   getPackById,
   getPackRow,
+  insertRankedMatch,
+  insertRankedMatchPlayers,
   insertLeaderboardEntry,
   isDbReady,
   listPacks,
+  updatePlayerRating,
   updatePack,
 } from './db';
 import { privyEnabled, verifyPrivyAccess } from './auth';
@@ -91,7 +112,7 @@ type PlayerRuntime = {
   respawns: number;
   respawnCooldownEndsAt: number | null;
   auth: {
-    userId: string;
+    userId: string | null;
     walletAddress: string | null;
     handle: string | null;
     avatarUrl: string | null;
@@ -104,7 +125,7 @@ type SpectatorRuntime = {
   id: string;
   name: string;
   auth: {
-    userId: string;
+    userId: string | null;
     walletAddress: string | null;
     handle: string | null;
     avatarUrl: string | null;
@@ -135,18 +156,25 @@ type RoomState = {
   chat: ChatMessage[];
   leaderboard: LeaderboardEntry[];
   pack: EventPack;
+  mode: RoomMode;
+  ranked?: {
+    seasonId: string;
+    matchId: string;
+    participants: Set<string>;
+  };
 };
 
 type ClientContext = {
   clientId: string;
-  roomId: string;
-  mode: 'player' | 'spectator';
+  roomId: string | null;
+  mode: 'player' | 'spectator' | 'queue';
 };
 
 const rooms = new Map<string, RoomState>();
 const clients = new WeakMap<WebSocket, ClientContext>();
 const connections = new Map<string, WebSocket>();
 let globalLeaderboard: LeaderboardEntry[] = [];
+let rankedLeaderboard: RankedLeaderboardEntry[] = [];
 const recentLeaderboardResults = new Map<string, {
   sessionId: string | null;
   sessionKey: string;
@@ -164,6 +192,20 @@ const recentLeaderboardResults = new Map<string, {
   capturedAt: number;
 }>();
 const submittedLeaderboardClients = new Map<string, string>();
+const clientAuth = new Map<string, { walletAddress: string; verifiedAt: number }>();
+const siweNonces = new Map<string, { nonce: string; issuedAt: number }>();
+
+type RankedTicket = {
+  clientId: string;
+  walletAddress: string;
+  playerName: string;
+  rating: number;
+  matchesPlayed: number;
+  enqueuedAt: number;
+  ws: WebSocket;
+};
+
+const rankedQueue = new Map<string, RankedTicket>();
 
 const getSessionKey = (room: RoomState, overrideSessionId?: string | null) => {
   if (overrideSessionId) return overrideSessionId;
@@ -213,7 +255,71 @@ const randomBetween = (min: number, max: number) => Math.floor(min + Math.random
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
+const MIN_RATING = 0;
+const RANK_DIVISIONS: Array<{
+  tier: RankTier;
+  division: RankDivision;
+  min: number;
+  max: number;
+}> = [
+  { tier: 'Bronze', division: 'III', min: 900, max: 999 },
+  { tier: 'Bronze', division: 'II', min: 1000, max: 1099 },
+  { tier: 'Bronze', division: 'I', min: 1100, max: 1199 },
+  { tier: 'Silver', division: 'III', min: 1200, max: 1299 },
+  { tier: 'Silver', division: 'II', min: 1300, max: 1399 },
+  { tier: 'Silver', division: 'I', min: 1400, max: 1499 },
+  { tier: 'Gold', division: 'III', min: 1500, max: 1599 },
+  { tier: 'Gold', division: 'II', min: 1600, max: 1699 },
+  { tier: 'Gold', division: 'I', min: 1700, max: 1799 },
+  { tier: 'Platinum', division: 'III', min: 1800, max: 1899 },
+  { tier: 'Platinum', division: 'II', min: 1900, max: 1999 },
+  { tier: 'Platinum', division: 'I', min: 2000, max: 2099 },
+  { tier: 'Diamond', division: 'III', min: 2100, max: 2199 },
+  { tier: 'Diamond', division: 'II', min: 2200, max: 2299 },
+  { tier: 'Diamond', division: 'I', min: 2300, max: Number.MAX_SAFE_INTEGER },
+];
+
+const TIER_ORDER: RankTier[] = ['Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond'];
+
+const TIER_RANGES = TIER_ORDER.reduce((acc, tier) => {
+  const divisions = RANK_DIVISIONS.filter((entry) => entry.tier === tier);
+  const min = Math.min(...divisions.map((entry) => entry.min));
+  const max = Math.max(...divisions.map((entry) => entry.max));
+  acc.set(tier, { min, max });
+  return acc;
+}, new Map<RankTier, { min: number; max: number }>());
+
+const getRankDivision = (rating: number) => {
+  const normalized = Math.max(MIN_RATING, Math.floor(rating));
+  const match = RANK_DIVISIONS.find((entry) => normalized >= entry.min && normalized <= entry.max);
+  if (match) {
+    return { ...match, label: `${match.tier} ${match.division}` };
+  }
+  const fallback = RANK_DIVISIONS[0];
+  return { ...fallback, label: `${fallback.tier} ${fallback.division}` };
+};
+
+const getTierIndex = (tier: RankTier) => TIER_ORDER.indexOf(tier);
+
+const getTierRangeByIndex = (index: number) => {
+  const safeIndex = clamp(index, 0, TIER_ORDER.length - 1);
+  const tier = TIER_ORDER[safeIndex];
+  const range = TIER_RANGES.get(tier) ?? { min: MIN_RATING, max: Number.MAX_SAFE_INTEGER };
+  return { tier, ...range };
+};
+
 const hashRoomKey = (value: string) => createHash('sha256').update(value).digest('hex');
+
+const generateNonce = () => randomUUID().replace(/-/g, '').slice(0, 16);
+
+const registerQueueClient = (ws: WebSocket, clientId: string) => {
+  const existing = clients.get(ws);
+  if (existing) return existing;
+  const context: ClientContext = { clientId, roomId: null, mode: 'queue' };
+  clients.set(ws, context);
+  connections.set(clientId, ws);
+  return context;
+};
 
 const normalizeRoomPlayers = (value?: number) => {
   const parsed = Number.isFinite(value) ? Number(value) : DEFAULT_ROOM_PLAYERS;
@@ -302,6 +408,7 @@ const buildRoomSnapshot = (room: RoomState, selfId: string): RoomSnapshot => {
     session: buildSessionSnapshot(room),
     leaderboard: room.leaderboard,
     pack: buildPackSummary(room.pack),
+    mode: room.mode,
   };
 };
 
@@ -331,6 +438,7 @@ const buildRoomListItem = (room: RoomState): RoomListItem => ({
   packName: room.pack?.name ?? null,
   hostName: room.hostId ? room.players.get(room.hostId)?.name ?? null : null,
   isLocked: Boolean(room.passcodeHash),
+  mode: room.mode,
 });
 
 const listRooms = () => {
@@ -342,6 +450,7 @@ const listRooms = () => {
   };
 
   return Array.from(rooms.values())
+    .filter((room) => room.mode !== 'ranked')
     .map((room) => buildRoomListItem(room))
     .sort((a, b) => {
       const statusDiff = statusOrder[a.status] - statusOrder[b.status];
@@ -438,7 +547,7 @@ const createRoom = (
   roomId: string,
   displayName: string,
   pack: EventPack,
-  options?: { maxPlayers?: number; passcodeHash?: string | null }
+  options?: { maxPlayers?: number; passcodeHash?: string | null; mode?: RoomMode; ranked?: RoomState['ranked'] }
 ): RoomState => ({
   roomId,
   displayName,
@@ -463,6 +572,8 @@ const createRoom = (
   chat: [],
   leaderboard: globalLeaderboard,
   pack,
+  mode: options?.mode ?? 'casual',
+  ranked: options?.ranked,
 });
 
 const scheduleMarketEvent = (room: RoomState) => {
@@ -560,6 +671,31 @@ const getNetWorth = (player: PlayerRuntime, price: number) => {
   if (!player.state.position) return player.state.cash;
   const pnl = getPnl(player.state.position, price);
   return player.state.cash + player.state.position.margin + pnl;
+};
+
+const expectedScore = (rating: number, opponentRating: number) => {
+  return 1 / (1 + 10 ** ((opponentRating - rating) / 400));
+};
+
+const getKFactor = (matchesPlayed: number, rating: number) => {
+  if (matchesPlayed < 10) return 40;
+  if (rating >= 2000) return 16;
+  return 20;
+};
+
+const getPlacementBonus = (playerCount: number, placement: number) => {
+  const bonuses: Record<number, number[]> = {
+    4: [6, 2, -2, -6],
+    5: [7, 3, 0, -3, -7],
+    6: [8, 4, 1, -1, -4, -8],
+  };
+  const list = bonuses[playerCount] ?? bonuses[6];
+  return list[placement - 1] ?? 0;
+};
+
+const placementScore = (playerCount: number, placement: number) => {
+  if (playerCount <= 1) return 1;
+  return (playerCount - placement) / (playerCount - 1);
 };
 
 const updatePeakCash = (player: PlayerRuntime, price: number) => {
@@ -725,6 +861,22 @@ const refreshLeaderboard = async () => {
   await setCachedLeaderboard(globalLeaderboard);
 };
 
+const refreshRankedLeaderboard = async () => {
+  const rows = await fetchRankedLeaderboard(RANKED_SEASON_ID, MAX_LEADERBOARD);
+  rankedLeaderboard = rows.map((row) => {
+    const rank = getRankDivision(row.rating);
+    return {
+      walletAddress: row.walletAddress,
+      playerName: row.playerName,
+      rating: row.rating,
+      tier: rank.tier,
+      division: rank.division,
+      matchesPlayed: row.matchesPlayed,
+      updatedAt: row.updatedAt,
+    };
+  });
+};
+
 const insertMemoryLeaderboardEntry = (entry: Omit<LeaderboardEntry, 'id' | 'createdAt'>) => {
   const record: LeaderboardEntry = {
     ...entry,
@@ -744,6 +896,137 @@ const broadcastLeaderboard = () => {
   }
 };
 
+type RankedSessionEntry = {
+  player: PlayerRuntime;
+  walletAddress: string;
+  cash: number;
+  roi: number;
+};
+
+const finalizeRankedMatch = async (room: RoomState, entries: RankedSessionEntry[]) => {
+  if (!room.ranked) return;
+  if (entries.length === 0) return;
+
+  const seasonId = room.ranked.seasonId;
+  const sorted = [...entries].sort((a, b) => b.cash - a.cash);
+  const placements = new Map<string, number>();
+  sorted.forEach((entry, index) => {
+    placements.set(entry.player.id, index + 1);
+  });
+
+  const ratingRows = new Map<string, { rating: number; matchesPlayed: number; playerName: string }>();
+  for (const entry of entries) {
+    const ratingRow = await getOrCreatePlayerRating({
+      seasonId,
+      walletAddress: entry.walletAddress,
+      playerName: entry.player.name,
+      defaultRating: RANKED_START_RATING,
+    });
+    ratingRows.set(entry.player.id, {
+      rating: ratingRow.rating,
+      matchesPlayed: ratingRow.matchesPlayed,
+      playerName: ratingRow.playerName,
+    });
+  }
+
+  const playerCount = entries.length;
+  const results = entries.map((entry) => {
+    const placement = placements.get(entry.player.id) ?? playerCount;
+    const ratingInfo = ratingRows.get(entry.player.id);
+    const ratingBefore = ratingInfo?.rating ?? RANKED_START_RATING;
+    const matchesPlayed = ratingInfo?.matchesPlayed ?? 0;
+
+    const expected = entries.reduce((acc, opponent) => {
+      if (opponent.player.id === entry.player.id) return acc;
+      const oppRating = ratingRows.get(opponent.player.id)?.rating ?? RANKED_START_RATING;
+      return acc + expectedScore(ratingBefore, oppRating);
+    }, 0) / Math.max(1, playerCount - 1);
+
+    const score = placementScore(playerCount, placement);
+    const bonus = getPlacementBonus(playerCount, placement);
+    const kFactor = getKFactor(matchesPlayed, ratingBefore);
+    const delta = Math.round((kFactor * (score - expected)) + bonus);
+    const ratingAfter = Math.max(MIN_RATING, ratingBefore + delta);
+
+    const rankBefore = getRankDivision(ratingBefore);
+    const rankAfter = getRankDivision(ratingAfter);
+
+    return {
+      walletAddress: entry.walletAddress,
+      playerName: entry.player.name,
+      placement,
+      ratingBefore,
+      ratingAfter,
+      delta,
+      matchesPlayed,
+      cash: entry.cash,
+      roi: entry.roi,
+      tierBefore: rankBefore.tier,
+      divisionBefore: rankBefore.division,
+      tierAfter: rankAfter.tier,
+      divisionAfter: rankAfter.division,
+    };
+  });
+
+  for (const result of results) {
+    await updatePlayerRating({
+      seasonId,
+      walletAddress: result.walletAddress,
+      playerName: result.playerName,
+      rating: result.ratingAfter,
+      matchesPlayed: result.matchesPlayed + 1,
+    });
+  }
+
+  const matchId = room.ranked.matchId;
+  await insertRankedMatch({
+    matchId,
+    seasonId,
+    roomId: room.roomId,
+    playerCount,
+  });
+
+  await insertRankedMatchPlayers(results.map((result) => ({
+    matchId,
+    walletAddress: result.walletAddress,
+    playerName: result.playerName,
+    placement: result.placement,
+    ratingBefore: result.ratingBefore,
+    ratingAfter: result.ratingAfter,
+    ratingDelta: result.delta,
+    cash: result.cash,
+    roi: result.roi,
+  })));
+
+  const payload: RankedMatchResult = {
+    matchId,
+    roomId: room.roomId,
+    seasonId,
+    playerCount,
+    players: results.map((result) => ({
+      walletAddress: result.walletAddress,
+      playerName: result.playerName,
+      placement: result.placement,
+      ratingBefore: result.ratingBefore,
+      ratingAfter: result.ratingAfter,
+      delta: result.delta,
+      tierBefore: result.tierBefore,
+      divisionBefore: result.divisionBefore,
+      tierAfter: result.tierAfter,
+      divisionAfter: result.divisionAfter,
+    })),
+  };
+
+  for (const entry of entries) {
+    const client = connections.get(entry.player.id);
+    if (client) {
+      send(client, { type: 'ranked_match_result', result: payload });
+    }
+  }
+
+  await refreshRankedLeaderboard();
+};
+
 const endRoomSession = async (room: RoomState) => {
   if (room.status === 'ENDED') return;
 
@@ -751,6 +1034,7 @@ const endRoomSession = async (room: RoomState) => {
   room.endsAt = Date.now();
 
   const price = room.market.price;
+  const rankedEntries: RankedSessionEntry[] = [];
 
   for (const player of room.players.values()) {
     if (player.state.position) {
@@ -814,6 +1098,15 @@ const endRoomSession = async (room: RoomState) => {
       }
     }
 
+    if (room.mode === 'ranked' && player.auth?.walletAddress) {
+      rankedEntries.push({
+        player,
+        walletAddress: player.auth.walletAddress,
+        cash: sessionCash,
+        roi,
+      });
+    }
+
     const client = connections.get(player.id);
     if (client) {
       send(client, { type: 'game_over', result: player.state });
@@ -822,6 +1115,10 @@ const endRoomSession = async (room: RoomState) => {
 
   if (room.sessionId) {
     await endSession(room.sessionId);
+  }
+
+  if (room.mode === 'ranked') {
+    await finalizeRankedMatch(room, rankedEntries);
   }
 
   await refreshLeaderboard();
@@ -1136,6 +1433,102 @@ const handleTrade = (room: RoomState, player: PlayerRuntime, trade: TradeRequest
   }
 };
 
+const buildRankedQueueStatus = (ticket: RankedTicket, now: number): RankedQueueStatus => {
+  const waitMs = now - ticket.enqueuedAt;
+  const crossTier = waitMs >= RANKED_ALLOW_CROSS_TIER_AFTER_MS;
+  const shortStart = waitMs >= RANKED_ALLOW_SHORT_START_AFTER_MS;
+
+  let rangeMin = ticket.rating - RANKED_RANGE_BASE;
+  let rangeMax = ticket.rating + RANKED_RANGE_BASE;
+
+  if (crossTier) {
+    const tier = getRankDivision(ticket.rating).tier;
+    const tierIndex = getTierIndex(tier);
+    const lower = getTierRangeByIndex(tierIndex - 1);
+    const upper = getTierRangeByIndex(tierIndex + 1);
+    rangeMin = lower.min;
+    rangeMax = upper.max;
+  }
+
+  return {
+    status: 'queued',
+    waitMs,
+    minPlayers: shortStart ? RANKED_MIN_PLAYERS : RANKED_MAX_PLAYERS,
+    maxPlayers: RANKED_MAX_PLAYERS,
+    rangeMin: Math.max(MIN_RATING, rangeMin),
+    rangeMax,
+    crossTier,
+  };
+};
+
+const isMutuallyCompatible = (a: RankedTicket, b: RankedTicket, now: number) => {
+  const statusA = buildRankedQueueStatus(a, now);
+  const statusB = buildRankedQueueStatus(b, now);
+  const inA = b.rating >= statusA.rangeMin && b.rating <= statusA.rangeMax;
+  const inB = a.rating >= statusB.rangeMin && a.rating <= statusB.rangeMax;
+  return inA && inB;
+};
+
+const sendQueueStatus = (ticket: RankedTicket, status: RankedQueueStatus) => {
+  send(ticket.ws, { type: 'ranked_queue_status', status });
+};
+
+const createRankedRoomForGroup = async (group: RankedTicket[]) => {
+  const roomId = `ranked-${randomUUID().slice(0, 8)}`;
+  const roomKey = randomUUID().replace(/-/g, '').slice(0, 8);
+  const matchId = randomUUID();
+  const participants = new Set(group.map((ticket) => ticket.walletAddress.toLowerCase()));
+
+  const room = createRoom(roomId, 'Ranked Match', CORE_PACK, {
+    maxPlayers: group.length,
+    passcodeHash: hashRoomKey(roomKey),
+    mode: 'ranked',
+    ranked: {
+      seasonId: RANKED_SEASON_ID,
+      matchId,
+      participants,
+    },
+  });
+  rooms.set(roomId, room);
+
+  for (const ticket of group) {
+    send(ticket.ws, {
+      type: 'ranked_match_found',
+      roomId,
+      roomKey,
+      playerCount: group.length,
+      seasonId: RANKED_SEASON_ID,
+    });
+    rankedQueue.delete(ticket.clientId);
+  }
+};
+
+const processRankedQueue = async () => {
+  if (rankedQueue.size === 0) return;
+  const now = Date.now();
+  const tickets = Array.from(rankedQueue.values()).sort((a, b) => a.enqueuedAt - b.enqueuedAt);
+  const used = new Set<string>();
+
+  for (const anchor of tickets) {
+    if (used.has(anchor.clientId)) continue;
+    const anchorStatus = buildRankedQueueStatus(anchor, now);
+    const eligible = tickets.filter((ticket) => (
+      !used.has(ticket.clientId) && isMutuallyCompatible(anchor, ticket, now)
+    ));
+
+    if (eligible.length >= anchorStatus.minPlayers) {
+      const group = eligible.slice(0, Math.min(anchorStatus.maxPlayers, eligible.length));
+      group.forEach((ticket) => used.add(ticket.clientId));
+      await createRankedRoomForGroup(group);
+    }
+  }
+
+  for (const ticket of rankedQueue.values()) {
+    const status = buildRankedQueueStatus(ticket, now);
+    sendQueueStatus(ticket, status);
+  }
+};
+
 const handleJoin = async (ws: WebSocket, message: ClientMessage & { type: 'join' }) => {
   const clientId = sanitizeClientId(message.clientId || randomUUID());
   const roomId = sanitizeRoomId(message.roomId);
@@ -1173,6 +1566,19 @@ const handleJoin = async (ws: WebSocket, message: ClientMessage & { type: 'join'
     }
   }
 
+  const auth = clientAuth.get(clientId) ?? null;
+  if (room.mode === 'ranked') {
+    if (!auth) {
+      send(ws, { type: 'error', message: 'Ranked match requires verified wallet.' });
+      return;
+    }
+    const participantList = room.ranked?.participants;
+    if (participantList && !participantList.has(auth.walletAddress.toLowerCase())) {
+      send(ws, { type: 'error', message: 'Not eligible for this ranked room.' });
+      return;
+    }
+  }
+
   let player = room.players.get(clientId);
   if (!player) {
     const activeCount = getActivePlayerCount(room);
@@ -1184,6 +1590,15 @@ const handleJoin = async (ws: WebSocket, message: ClientMessage & { type: 'join'
     room.players.set(clientId, player);
   } else {
     player.name = name;
+  }
+
+  if (auth) {
+    player.auth = {
+      userId: null,
+      walletAddress: auth.walletAddress,
+      handle: null,
+      avatarUrl: null,
+    };
   }
 
   room.clients.add(ws);
@@ -1201,6 +1616,16 @@ const handleJoin = async (ws: WebSocket, message: ClientMessage & { type: 'join'
 
   if (room.status === 'COUNTDOWN' && !arePlayersReady(room)) {
     resetCountdown(room);
+  }
+
+  if (room.mode === 'ranked') {
+    player.state.ready = true;
+    const activeCount = getActivePlayerCount(room);
+    if (room.status === 'LOBBY' && activeCount >= room.maxPlayers) {
+      room.status = 'COUNTDOWN';
+      room.countdownEndsAt = Date.now() + COUNTDOWN_MS;
+      broadcast(room, { type: 'session_status', session: buildSessionSnapshot(room) });
+    }
   }
 
   if (message.packId && mode === 'player' && room.status === 'LOBBY' && room.hostId === clientId) {
@@ -1346,6 +1771,89 @@ const handleMessage = async (ws: WebSocket, raw: string) => {
     return;
   }
 
+  if (message.type === 'siwe_nonce_request') {
+    const clientId = sanitizeClientId(message.clientId);
+    registerQueueClient(ws, clientId);
+    const nonce = generateNonce();
+    siweNonces.set(clientId, { nonce, issuedAt: Date.now() });
+    send(ws, { type: 'siwe_nonce', nonce });
+    return;
+  }
+
+  if (message.type === 'siwe_auth') {
+    const clientId = sanitizeClientId(message.clientId);
+    registerQueueClient(ws, clientId);
+    const nonceRecord = siweNonces.get(clientId);
+    if (!nonceRecord) {
+      send(ws, { type: 'error', message: 'Missing SIWE nonce.' });
+      return;
+    }
+    if (Date.now() - nonceRecord.issuedAt > 5 * 60 * 1000) {
+      siweNonces.delete(clientId);
+      send(ws, { type: 'error', message: 'SIWE nonce expired.' });
+      return;
+    }
+    try {
+      const siweMessage = new SiweMessage(message.message);
+      const result = await siweMessage.verify({ signature: message.signature, nonce: nonceRecord.nonce });
+      const walletAddress = (result?.data?.address ?? siweMessage.address)?.toLowerCase();
+      if (!walletAddress) {
+        send(ws, { type: 'error', message: 'SIWE verification failed.' });
+        return;
+      }
+      clientAuth.set(clientId, { walletAddress, verifiedAt: Date.now() });
+      siweNonces.delete(clientId);
+      send(ws, { type: 'siwe_authenticated', walletAddress });
+    } catch {
+      send(ws, { type: 'error', message: 'SIWE verification failed.' });
+    }
+    return;
+  }
+
+  if (message.type === 'ranked_queue_join') {
+    const clientId = sanitizeClientId(message.clientId);
+    registerQueueClient(ws, clientId);
+    const auth = clientAuth.get(clientId);
+    if (!auth) {
+      send(ws, { type: 'error', message: 'Wallet verification required for ranked.' });
+      return;
+    }
+    const playerName = sanitizeName(message.playerName);
+    const ratingRow = await getOrCreatePlayerRating({
+      seasonId: RANKED_SEASON_ID,
+      walletAddress: auth.walletAddress,
+      playerName,
+      defaultRating: RANKED_START_RATING,
+    });
+    rankedQueue.set(clientId, {
+      clientId,
+      walletAddress: auth.walletAddress,
+      playerName,
+      rating: ratingRow.rating,
+      matchesPlayed: ratingRow.matchesPlayed,
+      enqueuedAt: Date.now(),
+      ws,
+    });
+    const status = buildRankedQueueStatus(rankedQueue.get(clientId)!, Date.now());
+    sendQueueStatus(rankedQueue.get(clientId)!, status);
+    return;
+  }
+
+  if (message.type === 'ranked_queue_cancel') {
+    const clientId = sanitizeClientId(message.clientId);
+    rankedQueue.delete(clientId);
+    send(ws, { type: 'ranked_queue_status', status: {
+      status: 'cancelled',
+      waitMs: 0,
+      minPlayers: RANKED_MIN_PLAYERS,
+      maxPlayers: RANKED_MAX_PLAYERS,
+      rangeMin: 0,
+      rangeMax: 0,
+      crossTier: false,
+    } });
+    return;
+  }
+
   if (message.type === 'list_packs') {
     const packs = await listPacks();
     send(ws, { type: 'packs', packs });
@@ -1364,6 +1872,11 @@ const handleMessage = async (ws: WebSocket, raw: string) => {
 
   const context = clients.get(ws);
   if (!context) {
+    send(ws, { type: 'error', message: 'Join a room first.' });
+    return;
+  }
+
+  if (!context.roomId) {
     send(ws, { type: 'error', message: 'Join a room first.' });
     return;
   }
@@ -1417,6 +1930,7 @@ const handleMessage = async (ws: WebSocket, raw: string) => {
       return;
     }
     case 'set_ready': {
+      if (room.mode === 'ranked') return;
       if (!player || (room.status !== 'LOBBY' && room.status !== 'COUNTDOWN')) return;
       player.state.ready = Boolean(message.ready);
       broadcastPresence(room);
@@ -1427,6 +1941,7 @@ const handleMessage = async (ws: WebSocket, raw: string) => {
       return;
     }
     case 'start_countdown': {
+      if (room.mode === 'ranked') return;
       if ((room.status !== 'LOBBY' && room.status !== 'ENDED') || room.hostId !== player?.id) return;
       if (!arePlayersReady(room)) {
         send(ws, { type: 'error', message: 'Waiting for everyone to ready up.' });
@@ -1439,6 +1954,7 @@ const handleMessage = async (ws: WebSocket, raw: string) => {
       return;
     }
     case 'kick_player': {
+      if (room.mode === 'ranked') return;
       if (!player || room.hostId !== player.id) return;
       if (room.status !== 'LOBBY' && room.status !== 'COUNTDOWN') return;
       const targetId = sanitizeClientId(message.playerId);
@@ -1468,6 +1984,7 @@ const handleMessage = async (ws: WebSocket, raw: string) => {
       return;
     }
     case 'set_pack': {
+      if (room.mode === 'ranked') return;
       if (room.status !== 'LOBBY' || room.hostId !== player?.id) return;
       const packRecord = await getPackById(message.packId);
       if (!packRecord) {
@@ -1493,6 +2010,7 @@ const handleMessage = async (ws: WebSocket, raw: string) => {
       return;
     }
     case 'set_room_key': {
+      if (room.mode === 'ranked') return;
       if (room.status !== 'LOBBY' || room.hostId !== player?.id) return;
       const key = sanitizeRoomKey(message.roomKey);
       room.passcodeHash = key ? hashRoomKey(key) : null;
@@ -1737,7 +2255,7 @@ const tickRooms = async () => {
   }
 };
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   const url = req.url ?? '/';
   const isOptions = req.method === 'OPTIONS';
   if (isOptions) {
@@ -1867,6 +2385,17 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (url.startsWith('/ranked/leaderboard')) {
+    await refreshRankedLeaderboard();
+    const payload = JSON.stringify({ leaderboard: rankedLeaderboard });
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+    });
+    res.end(payload);
+    return;
+  }
+
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('ok');
 });
@@ -1881,10 +2410,12 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     const context = clients.get(ws);
     if (!context) return;
+    connections.delete(context.clientId);
+    rankedQueue.delete(context.clientId);
+    if (!context.roomId) return;
     const room = rooms.get(context.roomId);
     if (!room) return;
     room.clients.delete(ws);
-    connections.delete(context.clientId);
 
     if (room.status !== 'LIVE') {
       room.players.delete(context.clientId);
@@ -1909,9 +2440,15 @@ wss.on('connection', (ws) => {
 
 server.listen(PORT, async () => {
   await refreshLeaderboard();
+  await ensureRankedSeason(RANKED_SEASON_ID, 'Season 1');
+  await refreshRankedLeaderboard();
   console.log(`PK Candle WS server on :${PORT}`);
 });
 
 setInterval(() => {
   void tickRooms();
 }, TICK_INTERVAL_MS);
+
+setInterval(() => {
+  void processRankedQueue();
+}, RANKED_QUEUE_TICK_MS);

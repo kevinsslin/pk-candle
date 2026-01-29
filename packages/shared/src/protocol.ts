@@ -6,6 +6,10 @@ import type {
   PersonalEvent,
   PlayerState,
   Position,
+  RankedLeaderboardEntry,
+  RankedMatchResult,
+  RankedQueueStatus,
+  RoomMode,
 } from './types';
 
 export type SessionStatus = 'LOBBY' | 'COUNTDOWN' | 'LIVE' | 'ENDED';
@@ -94,6 +98,7 @@ export type RoomListItem = {
   packName: string | null;
   hostName: string | null;
   isLocked: boolean;
+  mode?: RoomMode;
 };
 
 export type SpectatorSummary = {
@@ -119,6 +124,7 @@ export type RoomSnapshot = {
   session: SessionSnapshot;
   leaderboard: LeaderboardEntry[];
   pack: EventPackSummary | null;
+  mode: RoomMode;
 };
 
 export type TradeRequest = {
@@ -161,6 +167,10 @@ export type ClientMessage =
   | { type: 'delete_pack'; packId: string; editToken?: string }
   | { type: 'auth'; accessToken: string; identityToken?: string }
   | { type: 'claim_leaderboard'; playerName?: string }
+  | { type: 'siwe_nonce_request'; clientId: string }
+  | { type: 'siwe_auth'; clientId: string; message: string; signature: string }
+  | { type: 'ranked_queue_join'; clientId: string; playerName: string }
+  | { type: 'ranked_queue_cancel'; clientId: string }
   | { type: 'ping' };
 
 export type ServerMessage =
@@ -190,5 +200,11 @@ export type ServerMessage =
   | { type: 'pack_detail'; packId: string; pack: EventPackInput }
   | { type: 'game_over'; result: PlayerState }
   | { type: 'leaderboard_submitted'; entry: LeaderboardEntry }
+  | { type: 'ranked_queue_status'; status: RankedQueueStatus }
+  | { type: 'ranked_match_found'; roomId: string; roomKey: string; playerCount: number; seasonId: string }
+  | { type: 'ranked_match_result'; result: RankedMatchResult }
+  | { type: 'siwe_nonce'; nonce: string }
+  | { type: 'siwe_authenticated'; walletAddress: string }
+  | { type: 'ranked_leaderboard'; entries: RankedLeaderboardEntry[] }
   | { type: 'pong' }
   | { type: 'error'; message: string };

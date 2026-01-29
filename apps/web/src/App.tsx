@@ -1,9 +1,13 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { DEFAULT_ROLE_KEY } from '@pk-candle/shared';
 import type {
   LeaderboardEntry,
   MarketEvent,
   PersonalEvent,
+  RankedLeaderboardEntry,
+  RankedMatchResult,
+  RankedQueueStatus,
   RoomListItem,
   RoomSnapshot,
   ServerMessage,
@@ -11,12 +15,16 @@ import type {
 } from '@pk-candle/shared';
 import EventModal from './components/EventModal';
 import GameOverScreen from './components/GameOverScreen';
+import RankedResultModal from './components/RankedResultModal';
 import { useI18n } from './i18n';
 import { normalizeRoomId } from './utils/room';
+import { useAccount, useChainId, useSignMessage } from 'wagmi';
+import { SiweMessage } from 'siwe';
 
 const LobbyPage = lazy(() => import('./pages/LobbyPage'));
 const RoomPage = lazy(() => import('./pages/RoomPage'));
 const LeaderboardPage = lazy(() => import('./pages/LeaderboardPage'));
+const RankedLeaderboardPage = lazy(() => import('./pages/RankedLeaderboardPage'));
 
 const RAW_WS_URL = import.meta.env.VITE_WS_URL as string | undefined;
 const WS_URL = RAW_WS_URL || (import.meta.env.DEV ? 'ws://localhost:8080' : '');
@@ -41,6 +49,7 @@ const toHttpUrl = (wsUrl: string, path: string) => {
 const ROOMS_URL = WS_URL ? toHttpUrl(WS_URL, '/rooms') : '';
 const LEADERBOARD_URL = WS_URL ? toHttpUrl(WS_URL, '/leaderboard') : '';
 const LEADERBOARD_SUBMIT_URL = LEADERBOARD_URL ? LEADERBOARD_URL.replace(/\/leaderboard$/, '/leaderboard/submit') : '';
+const RANKED_LEADERBOARD_URL = WS_URL ? toHttpUrl(WS_URL, '/ranked/leaderboard') : '';
 
 const loadClientId = () => {
   const existing = localStorage.getItem('pk-candle-client-id');
@@ -78,6 +87,8 @@ const loadLocalHistory = (): LocalRun[] => {
 const App = () => {
   const clientIdRef = useRef(loadClientId());
   const wsRef = useRef<WebSocket | null>(null);
+  const rankedWsRef = useRef<WebSocket | null>(null);
+  const nonceResolverRef = useRef<((nonce: string) => void) | null>(null);
   const [room, setRoom] = useState<RoomSnapshot | null>(null);
   const [personalEvent, setPersonalEvent] = useState<PersonalEvent | null>(null);
   const [personalEventEndsAt, setPersonalEventEndsAt] = useState<number | null>(null);
@@ -106,9 +117,21 @@ const App = () => {
   const [localHistory, setLocalHistory] = useState<LocalRun[]>(loadLocalHistory);
   const [languageOpen, setLanguageOpen] = useState(false);
   const [lastSubmittedEntryId, setLastSubmittedEntryId] = useState<string | null>(null);
+  const [rankedQueueStatus, setRankedQueueStatus] = useState<RankedQueueStatus | null>(null);
+  const [rankedQueueError, setRankedQueueError] = useState<string | null>(null);
+  const [rankedMatchResult, setRankedMatchResult] = useState<RankedMatchResult | null>(null);
+  const [rankedLeaderboard, setRankedLeaderboard] = useState<RankedLeaderboardEntry[]>([]);
+  const [rankedLeaderboardLoading, setRankedLeaderboardLoading] = useState(false);
+  const [rankedLeaderboardError, setRankedLeaderboardError] = useState<string | null>(null);
+  const [rankedVerifiedAddress, setRankedVerifiedAddress] = useState<string | null>(null);
+  const rankedPlayerNameRef = useRef<string>('');
   const languageRef = useRef<HTMLDivElement | null>(null);
   const roomRef = useRef<RoomSnapshot | null>(null);
   const leaderboardTimeoutRef = useRef<number | null>(null);
+
+  const { address, isConnected } = useAccount();
+  const chainId = useChainId();
+  const { signMessageAsync } = useSignMessage();
 
   const { t, lang, setLang } = useI18n();
   const location = useLocation();
@@ -181,6 +204,19 @@ const App = () => {
     window.localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify(localHistory));
   }, [localHistory]);
 
+  useEffect(() => {
+    if (!isConnected) {
+      setRankedVerifiedAddress(null);
+    }
+  }, [isConnected]);
+
+  useEffect(() => {
+    if (!address || !rankedVerifiedAddress) return;
+    if (address.toLowerCase() !== rankedVerifiedAddress.toLowerCase()) {
+      setRankedVerifiedAddress(null);
+    }
+  }, [address, rankedVerifiedAddress]);
+
   const leaveRoom = useCallback(() => {
     if (wsRef.current) {
       wsRef.current.close();
@@ -195,6 +231,7 @@ const App = () => {
     setGlobalEvent(null);
     setMarketFeed([]);
     setMode('player');
+    setRankedMatchResult(null);
   }, []);
 
   useEffect(() => {
@@ -236,6 +273,23 @@ const App = () => {
       setGlobalLeaderboard([]);
     } finally {
       setLeaderboardLoading(false);
+    }
+  }, [t]);
+
+  const fetchRankedLeaderboard = useCallback(async () => {
+    if (!RANKED_LEADERBOARD_URL) return;
+    setRankedLeaderboardLoading(true);
+    setRankedLeaderboardError(null);
+    try {
+      const response = await fetch(RANKED_LEADERBOARD_URL);
+      if (!response.ok) throw new Error('ranked');
+      const payload = await response.json() as { leaderboard?: RankedLeaderboardEntry[] };
+      setRankedLeaderboard(Array.isArray(payload.leaderboard) ? payload.leaderboard : []);
+    } catch {
+      setRankedLeaderboardError(t('rankedLeaderboardLoadFailed'));
+      setRankedLeaderboard([]);
+    } finally {
+      setRankedLeaderboardLoading(false);
     }
   }, [t]);
 
@@ -296,6 +350,11 @@ const App = () => {
     if (!LEADERBOARD_URL) return;
     void fetchLeaderboard();
   }, [fetchLeaderboard]);
+
+  useEffect(() => {
+    if (!RANKED_LEADERBOARD_URL) return;
+    void fetchRankedLeaderboard();
+  }, [fetchRankedLeaderboard]);
 
   useEffect(() => {
     if (room?.session.status === 'ENDED' || room?.self?.status === 'ELIMINATED') {
@@ -380,6 +439,10 @@ const App = () => {
         });
         void fetchLeaderboard();
         return;
+      case 'ranked_match_result':
+        setRankedMatchResult(payload.result);
+        void fetchRankedLeaderboard();
+        return;
       case 'self_state':
         setRoom((prev) => {
           if (!prev) return prev;
@@ -440,7 +503,7 @@ const App = () => {
       default:
         return;
     }
-  }, [fetchLeaderboard, isNonBlockingError, leaderboardClaiming, mapLeaderboardError, t]);
+  }, [fetchLeaderboard, fetchRankedLeaderboard, isNonBlockingError, leaderboardClaiming, mapLeaderboardError, t]);
 
   const connect = useCallback((params: {
     roomId: string;
@@ -502,6 +565,163 @@ const App = () => {
       setPersonalEventEndsAt(null);
     };
   }, [handleServerMessage, sendMessage]);
+
+  const handleRankedMessage = useCallback((payload: ServerMessage) => {
+    switch (payload.type) {
+      case 'siwe_nonce':
+        if (nonceResolverRef.current) {
+          nonceResolverRef.current(payload.nonce);
+          nonceResolverRef.current = null;
+        }
+        return;
+      case 'siwe_authenticated':
+        setRankedVerifiedAddress(payload.walletAddress);
+        setRankedQueueError(null);
+        return;
+      case 'ranked_queue_status':
+        if (payload.status.status === 'cancelled') {
+          setRankedQueueStatus(null);
+        } else {
+          setRankedQueueStatus(payload.status);
+        }
+        if (payload.status.status === 'queued') {
+          setRankedQueueError(null);
+        }
+        return;
+      case 'ranked_match_found': {
+        setRankedQueueStatus(null);
+        setRankedQueueError(null);
+        const name = rankedPlayerNameRef.current || t('guest');
+        connect({
+          roomId: payload.roomId,
+          roomName: 'Ranked Match',
+          playerName: name,
+          roleKey: DEFAULT_ROLE_KEY,
+          roomKey: payload.roomKey,
+          maxPlayers: payload.playerCount,
+        });
+        navigate(`/room/${payload.roomId}`);
+        if (rankedWsRef.current) {
+          rankedWsRef.current.close();
+          rankedWsRef.current = null;
+        }
+        return;
+      }
+      case 'error':
+        setRankedQueueError(payload.message);
+        return;
+      default:
+        return;
+    }
+  }, [connect, navigate, t]);
+
+  const ensureRankedSocket = useCallback(() => {
+    if (!WS_URL) throw new Error('WS URL missing');
+    if (rankedWsRef.current) {
+      if (rankedWsRef.current.readyState === WebSocket.OPEN) {
+        return Promise.resolve(rankedWsRef.current);
+      }
+      if (rankedWsRef.current.readyState === WebSocket.CONNECTING) {
+        return new Promise<WebSocket>((resolve, reject) => {
+          const ws = rankedWsRef.current!;
+          const handleOpen = () => {
+            ws.removeEventListener('open', handleOpen);
+            resolve(ws);
+          };
+          const handleError = () => {
+            ws.removeEventListener('error', handleError);
+            reject(new Error('Ranked socket error'));
+          };
+          ws.addEventListener('open', handleOpen);
+          ws.addEventListener('error', handleError);
+        });
+      }
+    }
+
+    return new Promise<WebSocket>((resolve, reject) => {
+      const ws = new WebSocket(WS_URL);
+      rankedWsRef.current = ws;
+      ws.onmessage = (event) => {
+        const message = JSON.parse(event.data) as ServerMessage;
+        handleRankedMessage(message);
+      };
+      ws.onerror = () => {
+        setRankedQueueError(t('wsError'));
+      };
+      ws.onopen = () => resolve(ws);
+      ws.onclose = () => {
+        rankedWsRef.current = null;
+      };
+      ws.addEventListener('error', () => reject(new Error('Ranked socket error')));
+    });
+  }, [handleRankedMessage, t]);
+
+  const requestSiweNonce = useCallback(async () => {
+    const ws = await ensureRankedSocket();
+    return new Promise<string>((resolve) => {
+      nonceResolverRef.current = resolve;
+      ws.send(JSON.stringify({ type: 'siwe_nonce_request', clientId: clientIdRef.current }));
+    });
+  }, [ensureRankedSocket]);
+
+  const handleVerifyWallet = useCallback(async () => {
+    if (!address) {
+      setRankedQueueError(t('rankedConnectWalletFirst'));
+      return;
+    }
+    try {
+      setRankedQueueError(null);
+      const nonce = await requestSiweNonce();
+      const siweMessage = new SiweMessage({
+        domain: window.location.host,
+        address,
+        statement: t('rankedSiweStatement'),
+        uri: window.location.origin,
+        version: '1',
+        chainId,
+        nonce,
+      });
+      const message = siweMessage.prepareMessage();
+      const signature = await signMessageAsync({ message });
+      const ws = await ensureRankedSocket();
+      ws.send(JSON.stringify({
+        type: 'siwe_auth',
+        clientId: clientIdRef.current,
+        message,
+        signature,
+      }));
+    } catch (err) {
+      setRankedQueueError(err instanceof Error ? err.message : t('rankedVerifyFailed'));
+    }
+  }, [address, chainId, ensureRankedSocket, requestSiweNonce, signMessageAsync, t]);
+
+  const handleJoinRankedQueue = useCallback(async (playerName: string) => {
+    if (!rankedVerifiedAddress) {
+      setRankedQueueError(t('rankedVerifyRequired'));
+      return;
+    }
+    try {
+      setRankedQueueError(null);
+      rankedPlayerNameRef.current = playerName.trim() || t('guest');
+      const ws = await ensureRankedSocket();
+      ws.send(JSON.stringify({
+        type: 'ranked_queue_join',
+        clientId: clientIdRef.current,
+        playerName: rankedPlayerNameRef.current,
+      }));
+    } catch (err) {
+      setRankedQueueError(err instanceof Error ? err.message : t('rankedQueueFailed'));
+    }
+  }, [ensureRankedSocket, rankedVerifiedAddress, t]);
+
+  const handleCancelRankedQueue = useCallback(() => {
+    if (!rankedWsRef.current || rankedWsRef.current.readyState !== WebSocket.OPEN) {
+      setRankedQueueStatus(null);
+      return;
+    }
+    rankedWsRef.current.send(JSON.stringify({ type: 'ranked_queue_cancel', clientId: clientIdRef.current }));
+    setRankedQueueStatus(null);
+  }, []);
 
   const handleSendChat = (text: string) => sendMessage({ type: 'chat', text });
   const handleTrade = (trade: TradeRequest) => sendMessage({ type: 'trade', trade });
@@ -640,6 +860,16 @@ const App = () => {
             type="button"
             onClick={() => {
               if (room) leaveRoom();
+              navigate('/ranked');
+            }}
+            className="pixel-button ghost text-xs"
+          >
+            {t('rankedLeaderboardNav')}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (room) leaveRoom();
               navigate('/leaderboard');
             }}
             className="pixel-button ghost text-xs"
@@ -745,6 +975,12 @@ const App = () => {
                   roomsLoading={roomsLoading}
                   onRefreshRooms={fetchRooms}
                   prefillRoomId={queryRoomId}
+                  rankedQueueStatus={rankedQueueStatus}
+                  rankedQueueError={rankedQueueError}
+                  rankedVerifiedAddress={rankedVerifiedAddress}
+                  onRankedVerify={handleVerifyWallet}
+                  onRankedJoin={handleJoinRankedQueue}
+                  onRankedCancel={handleCancelRankedQueue}
                 />
               )}
             />
@@ -794,6 +1030,17 @@ const App = () => {
               )}
             />
             <Route
+              path="/ranked"
+              element={(
+                <RankedLeaderboardPage
+                  entries={rankedLeaderboard}
+                  loading={rankedLeaderboardLoading}
+                  error={rankedLeaderboardError}
+                  onRefresh={fetchRankedLeaderboard}
+                />
+              )}
+            />
+            <Route
               path="*"
               element={(
                 <div className="pixel-card max-w-xl mx-auto text-center">
@@ -815,7 +1062,18 @@ const App = () => {
         />
       )}
 
-      {!dismissedGameOver && room?.session.status === 'ENDED' && (
+      {!dismissedGameOver && room?.session.status === 'ENDED' && room?.mode === 'ranked' && rankedMatchResult && (
+        <RankedResultModal
+          result={rankedMatchResult}
+          selfWallet={rankedVerifiedAddress}
+          onDismiss={() => {
+            setDismissedGameOver(true);
+            leaveRoom();
+          }}
+        />
+      )}
+
+      {!dismissedGameOver && room?.session.status === 'ENDED' && room?.mode !== 'ranked' && (
         <GameOverScreen
           player={room.self}
           leaderboard={globalLeaderboard}

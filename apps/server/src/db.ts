@@ -1,9 +1,9 @@
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import type { EventPackInput, EventPackSummary, LeaderboardEntry } from '@pk-candle/shared';
 import { CORE_PACK } from '@pk-candle/shared';
-import { eventPacks, leaderboardEntries, sessions } from './schema';
+import { eventPacks, leaderboardEntries, playerRatings, rankedMatchPlayers, rankedMatches, rankedSeasons, sessions } from './schema';
 
 const databaseUrl = process.env.DATABASE_URL ?? process.env.DB_URL;
 const DB_CONNECT_TIMEOUT_MS = Number(process.env.DB_CONNECT_TIMEOUT_MS ?? 5000);
@@ -151,6 +151,219 @@ export const fetchLeaderboard = async (limit: number) => {
   );
   if (!rows) return [] as LeaderboardEntry[];
   return rows.map(toLeaderboardEntry);
+};
+
+type PlayerRatingRow = {
+  seasonId: string;
+  walletAddress: string;
+  playerName: string;
+  rating: number;
+  matchesPlayed: number;
+  updatedAt: number;
+};
+
+const memoryRatings = new Map<string, PlayerRatingRow>();
+
+const ratingKey = (seasonId: string, walletAddress: string) => `${seasonId}:${walletAddress.toLowerCase()}`;
+
+export const ensureRankedSeason = async (seasonId: string, name: string) => {
+  if (!db) return null;
+  const rows = await runQuery(
+    db.select().from(rankedSeasons).where(eq(rankedSeasons.id, seasonId)),
+    'ensureRankedSeason:select',
+  );
+  if (rows && rows.length > 0) return rows[0];
+  const inserted = await runQuery(
+    db.insert(rankedSeasons).values({ id: seasonId, name }).returning(),
+    'ensureRankedSeason:insert',
+  );
+  return inserted?.[0] ?? null;
+};
+
+export const getOrCreatePlayerRating = async (params: {
+  seasonId: string;
+  walletAddress: string;
+  playerName: string;
+  defaultRating: number;
+}) => {
+  const key = ratingKey(params.seasonId, params.walletAddress);
+  if (!db) {
+    const existing = memoryRatings.get(key);
+    if (existing) return existing;
+    const created: PlayerRatingRow = {
+      seasonId: params.seasonId,
+      walletAddress: params.walletAddress,
+      playerName: params.playerName,
+      rating: params.defaultRating,
+      matchesPlayed: 0,
+      updatedAt: Date.now(),
+    };
+    memoryRatings.set(key, created);
+    return created;
+  }
+
+  const rows = await runQuery(
+    db.select()
+      .from(playerRatings)
+      .where(and(
+        eq(playerRatings.walletAddress, params.walletAddress),
+        eq(playerRatings.seasonId, params.seasonId),
+      ))
+      .limit(1),
+    'getOrCreatePlayerRating:select',
+  );
+  const row = rows?.[0];
+  if (row) {
+    return {
+      seasonId: row.seasonId,
+      walletAddress: row.walletAddress,
+      playerName: row.playerName,
+      rating: row.rating,
+      matchesPlayed: row.matchesPlayed,
+      updatedAt: row.updatedAt ? row.updatedAt.getTime() : Date.now(),
+    };
+  }
+
+  const inserted = await runQuery(
+    db.insert(playerRatings).values({
+      seasonId: params.seasonId,
+      walletAddress: params.walletAddress,
+      playerName: params.playerName,
+      rating: params.defaultRating,
+      matchesPlayed: 0,
+    }).returning(),
+    'getOrCreatePlayerRating:insert',
+  );
+  const created = inserted?.[0];
+  if (!created) {
+    return {
+      seasonId: params.seasonId,
+      walletAddress: params.walletAddress,
+      playerName: params.playerName,
+      rating: params.defaultRating,
+      matchesPlayed: 0,
+      updatedAt: Date.now(),
+    };
+  }
+  return {
+    seasonId: created.seasonId,
+    walletAddress: created.walletAddress,
+    playerName: created.playerName,
+    rating: created.rating,
+    matchesPlayed: created.matchesPlayed,
+    updatedAt: created.updatedAt ? created.updatedAt.getTime() : Date.now(),
+  };
+};
+
+export const updatePlayerRating = async (params: {
+  seasonId: string;
+  walletAddress: string;
+  playerName: string;
+  rating: number;
+  matchesPlayed: number;
+}) => {
+  const key = ratingKey(params.seasonId, params.walletAddress);
+  if (!db) {
+    memoryRatings.set(key, {
+      seasonId: params.seasonId,
+      walletAddress: params.walletAddress,
+      playerName: params.playerName,
+      rating: params.rating,
+      matchesPlayed: params.matchesPlayed,
+      updatedAt: Date.now(),
+    });
+    return;
+  }
+  await runQuery(
+    db.update(playerRatings)
+      .set({
+        playerName: params.playerName,
+        rating: params.rating,
+        matchesPlayed: params.matchesPlayed,
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(playerRatings.walletAddress, params.walletAddress),
+        eq(playerRatings.seasonId, params.seasonId),
+      )),
+    'updatePlayerRating',
+  );
+};
+
+export const insertRankedMatch = async (params: {
+  matchId?: string;
+  seasonId: string;
+  roomId: string;
+  playerCount: number;
+}) => {
+  if (!db) return null;
+  const rows = await runQuery(
+    db.insert(rankedMatches)
+      .values({
+        id: params.matchId ?? undefined,
+        seasonId: params.seasonId,
+        roomId: params.roomId,
+        playerCount: params.playerCount,
+      })
+      .returning(),
+    'insertRankedMatch',
+  );
+  return rows?.[0] ?? null;
+};
+
+export const insertRankedMatchPlayers = async (rows: Array<{
+  matchId: string;
+  walletAddress: string;
+  playerName: string;
+  placement: number;
+  ratingBefore: number;
+  ratingAfter: number;
+  ratingDelta: number;
+  cash: number;
+  roi: number;
+}>) => {
+  if (!db || rows.length === 0) return;
+  await runQuery(
+    db.insert(rankedMatchPlayers).values(rows.map((row) => ({
+      matchId: row.matchId,
+      walletAddress: row.walletAddress,
+      playerName: row.playerName,
+      placement: row.placement,
+      ratingBefore: row.ratingBefore,
+      ratingAfter: row.ratingAfter,
+      ratingDelta: row.ratingDelta,
+      cash: row.cash.toFixed(2),
+      roi: row.roi.toFixed(2),
+    }))),
+    'insertRankedMatchPlayers',
+  );
+};
+
+export const fetchRankedLeaderboard = async (seasonId: string, limit: number): Promise<PlayerRatingRow[]> => {
+  if (!db) {
+    const entries = Array.from(memoryRatings.values())
+      .filter((row) => row.seasonId === seasonId)
+      .sort((a, b) => b.rating - a.rating)
+      .slice(0, limit);
+    return entries;
+  }
+  const rows = await runQuery(
+    db.select()
+      .from(playerRatings)
+      .where(eq(playerRatings.seasonId, seasonId))
+      .orderBy(desc(playerRatings.rating))
+      .limit(limit),
+    'fetchRankedLeaderboard',
+  );
+  if (!rows) return [];
+  return rows.map((row) => ({
+    seasonId: row.seasonId,
+    walletAddress: row.walletAddress,
+    playerName: row.playerName,
+    rating: row.rating,
+    matchesPlayed: row.matchesPlayed,
+    updatedAt: row.updatedAt ? row.updatedAt.getTime() : Date.now(),
+  }));
 };
 
 export const listPacks = async (): Promise<EventPackSummary[]> => {

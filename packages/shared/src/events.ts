@@ -65,135 +65,135 @@ export const pickMarketEvent = (
 const PERSONAL_EVENTS: PersonalEvent[] = [
   {
     id: 'health-001',
-    title: '身体不适',
-    description: '连续盯盘过久，身体发出警告。',
+    title: 'Gas 过敏',
+    description: '连续盯盘 + 刷空投任务，你开始对“再点一次确认”过敏。',
     choices: [
-      { id: 'A', text: '去医院体检', effect: { cash: -200 } },
-      { id: 'B', text: '硬扛继续盯盘', effect: { cash: 0 } }
+      { id: 'A', text: '休息+买护眼灯', effect: { cash: -200 } },
+      { id: 'B', text: '继续“再点一次确认”', effect: { cash: 0 } }
     ]
   },
   {
     id: 'stress-001',
-    title: '脱发危机',
-    description: '洗澡时头发掉了一地，你开始怀疑人生。',
+    title: '头皮质押',
+    description: '头发掉得像解锁进度条，你怀疑自己在质押头皮。',
     choices: [
-      { id: 'A', text: '植发套餐', effect: { cash: -800 } },
-      { id: 'B', text: '光头直播带货', effect: { cash: 300 } }
+      { id: 'A', text: '买生发盲盒', effect: { cash: -800 } },
+      { id: 'B', text: '光头上链直播', effect: { cash: 300 } }
     ]
   },
   {
     id: 'kol-001',
-    title: 'KOL 喊单',
-    description: '推特大V突然喊单，群里瞬间炸锅。',
+    title: 'Space 喊单',
+    description: '某大 V 开 Twitter Space，声音像白皮书一样厚。',
     choices: [
-      { id: 'A', text: '跟单小赚', effect: { cash: 500 } },
-      { id: 'B', text: '反向被套', effect: { cash: -400 } }
+      { id: 'A', text: '跟单“试试”', effect: { cash: 500 } },
+      { id: 'B', text: '反向被“教育”', effect: { cash: -400 } }
     ]
   },
   {
     id: 'faith-001',
     title: 'FUD 来袭',
-    description: '群里传出项目方跑路的消息。',
+    description: '群里传“跨链桥出事”，表情包都飞起来了。',
     choices: [
-      { id: 'A', text: '恐慌割肉', effect: { cash: -300 } },
-      { id: 'B', text: '无视谣言', effect: { cash: 200 } }
+      { id: 'A', text: '恐慌止损', effect: { cash: -300 } },
+      { id: 'B', text: '看链上数据再说', effect: { cash: 200 } }
     ]
   },
   {
     id: 'listing-001',
-    title: '上币预热',
-    description: '传闻交易所即将上架，市场热度飙升。',
+    title: '疑似上所',
+    description: '有人截图“交易所小号暗示”，市场开始自嗨。',
     choices: [
       { id: 'A', text: '提前埋伏', effect: { cash: 700 } },
-      { id: 'B', text: '错过车票', effect: { cash: -200 } }
+      { id: 'B', text: '继续等官宣', effect: { cash: -200 } }
     ]
   },
   {
     id: 'poor-001',
-    title: '生活拮据',
-    description: '泡面都吃不起了，要不要去打个工？',
+    title: 'Gas 费吃掉午饭',
+    description: '转账一笔手续费比午饭还贵。',
     conditions: { maxCash: 100 },
     choices: [
-      { id: 'A', text: '兼职补贴', effect: { cash: 120 } },
-      { id: 'B', text: '继续躺平', effect: { cash: -30 } }
+      { id: 'A', text: '接个 Web3 外包', effect: { cash: 120 } },
+      { id: 'B', text: '继续原地挖坑', effect: { cash: -30 } }
     ]
   },
   {
     id: 'club-001',
-    title: '会所嫩模',
-    description: '今晚赚麻了，兄弟们喊你去消费。',
+    title: '链上 Afterparty',
+    description: '今晚“财富自由”群组织线下派对。',
     conditions: { minCash: 10000 },
     choices: [
       { id: 'A', text: '全场买单', effect: { cash: -2000 } },
-      { id: 'B', text: '省钱复盘', effect: { cash: 300 } }
+      { id: 'B', text: '回家复盘', effect: { cash: 300 } }
     ]
   },
   {
     id: 'house-001',
-    title: '买房置业',
-    description: '中介推荐一套海景房。',
+    title: '拿币换房',
+    description: '中介说可以 BTC 结算，语气比白皮书还自信。',
     conditions: { minCash: 50000 },
     choices: [
-      { id: 'A', text: '首付出手', effect: { cash: -50000 } },
-      { id: 'B', text: '继续持币', effect: { cash: 0 } }
+      { id: 'A', text: '首付打过去', effect: { cash: -50000 } },
+      { id: 'B', text: '继续持币观望', effect: { cash: 0 } }
     ]
   },
   {
     id: 'ex-001',
-    title: '前任来电',
-    description: '听说你赚了钱，对方突然发消息。',
+    title: '前任来借 U',
+    description: 'TA 说只是短借 USDT，真的。',
     conditions: { minCash: 5000 },
     choices: [
-      { id: 'A', text: '转账 888', effect: { cash: -888 } },
-      { id: 'B', text: '冷处理', effect: { cash: 200 } }
+      { id: 'A', text: '转 888U', effect: { cash: -888 } },
+      { id: 'B', text: '已读不回', effect: { cash: 200 } }
     ]
   },
   {
     id: 'match-001',
-    title: '相亲局',
-    description: '家里安排了相亲，对方问你是做什么的。',
+    title: '相亲问职业',
+    description: '对方问你做什么，你脑内只有“链上”。',
     conditions: { minCash: 2000 },
     choices: [
-      { id: 'A', text: '吹牛翻车', effect: { cash: -150 } },
-      { id: 'B', text: '老实人设', effect: { cash: 80 } }
+      { id: 'A', text: '吹成“量化基金”', effect: { cash: -150 } },
+      { id: 'B', text: '老实说“打工挖空投”', effect: { cash: 80 } }
     ]
   },
   {
     id: 'hack-001',
-    title: '遭遇黑客',
-    description: '有人发来一个 “空投领取” 链接。',
+    title: '空投陷阱',
+    description: '陌生人发来“只需签名即可领”的链接。',
     conditions: { minCash: 500 },
     choices: [
-      { id: 'A', text: '点开被骗', effect: { cash: -1000 } },
-      { id: 'B', text: '无视钓鱼', effect: { cash: 50 } }
+      { id: 'A', text: '一键授权', effect: { cash: -1000 } },
+      { id: 'B', text: '报告钓鱼', effect: { cash: 50 } }
     ]
   },
   {
     id: 'loan-001',
-    title: '借钱炒币',
-    description: '网贷平台发来额度提升短信。',
+    title: '质押借贷广告',
+    description: '平台推送“0 抵押高额度”，听起来像诈骗。',
     conditions: { minCash: 1, maxCash: 500 },
     choices: [
-      { id: 'A', text: '借钱上车', effect: { cash: 2000 } },
-      { id: 'B', text: '放弃机会', effect: { cash: -100 } }
+      { id: 'A', text: '上杠杆冲一把', effect: { cash: 2000 } },
+      { id: 'B', text: '关通知保命', effect: { cash: -100 } }
     ]
   },
   {
     id: 'pc-001',
-    title: '电脑故障',
-    description: '关键时刻电脑突然蓝屏。',
+    title: '节点宕机',
+    description: '关键时刻电脑蓝屏，像你的验证节点。',
     choices: [
-      { id: 'A', text: '重装系统', effect: { cash: -600 } },
-      { id: 'B', text: '借朋友电脑', effect: { cash: -150 } }
+      { id: 'A', text: '紧急修机', effect: { cash: -600 } },
+      { id: 'B', text: '借朋友设备', effect: { cash: -150 } }
     ]
   },
   {
     id: 'usb-001',
-    title: '捡到 U 盘',
-    description: '路边捡到一个写着 “BTC 私钥” 的 U 盘。',
+    title: '捡到助记词 U 盘',
+    description: 'U 盘上写着“十二词，懂的来”。',
     choices: [
       { id: 'A', text: '插电脑中毒', effect: { cash: -400 } },
-      { id: 'B', text: '卖给回收', effect: { cash: 100 } }
+      { id: 'B', text: '上交二手店', effect: { cash: 100 } }
     ]
   }
 ];
@@ -201,32 +201,32 @@ const PERSONAL_EVENTS: PersonalEvent[] = [
 const MARKET_EVENTS: MarketEvent[] = [
   {
     id: 'market-201',
-    title: 'KOL 一键开播',
-    description: '全网 KOL 集体喊单，热度拉满。',
+    title: 'KOL 集体开麦',
+    description: '全网 Space 开爆，情绪直接拉满。',
     effect: { phase: 'PUMP', volatilityDelta: 0.03 }
   },
   {
     id: 'market-202',
-    title: '交易所上币预热',
-    description: '交易所官推点赞，群里炸了。',
+    title: '交易所小号暗示',
+    description: '官推点赞 + 神秘表情包，群里直接起飞。',
     effect: { phase: 'PUMP', volatilityDelta: 0.02 }
   },
   {
     id: 'market-203',
-    title: '监管利空',
-    description: '某大区监管收紧，情绪瞬间转冷。',
+    title: '监管发声',
+    description: '某地区放风收紧，市场瞬间降温。',
     effect: { phase: 'DUMP', volatilityDelta: 0.03 }
   },
   {
     id: 'market-204',
-    title: '巨鲸砸盘',
-    description: '链上监控报警，巨鲸开始出货。',
+    title: '巨鲸搬砖',
+    description: '链上监控报警，大额转入交易所。',
     effect: { phase: 'DUMP', volatilityDelta: 0.04 }
   },
   {
     id: 'market-205',
-    title: '拉升拉升',
-    description: '项目方回购，K 线拐头向上。',
+    title: '项目方回购',
+    description: '国库回购上链，K 线开始拐头。',
     conditions: { phaseIn: ['Accumulation', 'PUMP', 'DUMP', 'MOON'] },
     effect: { phase: 'PUMP', volatilityDelta: 0.025 }
   }

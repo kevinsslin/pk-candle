@@ -50,6 +50,52 @@ export type TradeHistoryItem = {
 export type PlayerStatus = 'ACTIVE' | 'ELIMINATED' | 'FINISHED';
 export type EndReason = 'BROKE' | 'DEAD' | 'TIME';
 
+export type RoomMode = 'casual' | 'ranked';
+
+export type RankTier = 'Bronze' | 'Silver' | 'Gold' | 'Platinum' | 'Diamond';
+export type RankDivision = 'III' | 'II' | 'I';
+
+export type RankedLeaderboardEntry = {
+  walletAddress: string;
+  playerName: string;
+  rating: number;
+  tier: RankTier;
+  division: RankDivision;
+  matchesPlayed: number;
+  updatedAt: number;
+};
+
+export type RankedMatchPlayerResult = {
+  walletAddress: string;
+  playerName: string;
+  placement: number;
+  ratingBefore: number;
+  ratingAfter: number;
+  delta: number;
+  tierBefore: RankTier;
+  divisionBefore: RankDivision;
+  tierAfter: RankTier;
+  divisionAfter: RankDivision;
+};
+
+export type RankedMatchResult = {
+  matchId: string;
+  roomId: string;
+  seasonId: string;
+  playerCount: number;
+  players: RankedMatchPlayerResult[];
+};
+
+export type RankedQueueStatus = {
+  status: 'queued' | 'matching' | 'found' | 'cancelled' | 'error';
+  waitMs: number;
+  minPlayers: number;
+  maxPlayers: number;
+  rangeMin: number;
+  rangeMax: number;
+  crossTier: boolean;
+};
+
 export type PlayerState = {
   id: string;
   name: string;
